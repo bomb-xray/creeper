@@ -138,9 +138,18 @@ public class Game : IDisposable
                 {
                     Console.WriteLine($"Loading music: {path}");
                     Music music = Raylib.LoadMusicStream(path);
-                    loaded = true;
-                    Console.WriteLine($"  -> Success!");
-                    return music;
+                    
+                    // Check if music actually loaded (frameCount > 0 means valid)
+                    if (music.FrameCount > 0)
+                    {
+                        loaded = true;
+                        Console.WriteLine($"  -> Success! (frames: {music.FrameCount})");
+                        return music;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"  -> Failed: Format not supported or file corrupted");
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -222,11 +231,12 @@ public class Game : IDisposable
         }
 
         // Load click sound
-        string[] soundExtensions = { ".wav", ".ogg", ".mp3", ".flac", ".m4a", ".aac" };
+        string[] soundExtensions = { ".wav", ".ogg", ".mp3", ".flac" };
         _clickSound = LoadSoundWithFallback(assetDir, "click", soundExtensions);
 
         // Load music with multiple format support
-        string[] musicExtensions = { ".wav", ".ogg", ".mp3", ".flac", ".m4a", ".aac" };
+        // Note: Raylib supports WAV, OGG, MP3, FLAC. M4A/AAC NOT supported.
+        string[] musicExtensions = { ".ogg", ".wav", ".mp3", ".flac" };
         
         _musicLoaded = false;
         _bgMusic = LoadMusicWithFallback(assetDir, "untrust", musicExtensions, out _musicLoaded);
