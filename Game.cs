@@ -222,11 +222,11 @@ public class Game : IDisposable
         }
 
         // Load click sound
-        string[] soundExtensions = { ".wav", ".ogg", ".mp3", ".flac" };
+        string[] soundExtensions = { ".wav", ".ogg", ".mp3", ".flac", ".m4a", ".aac" };
         _clickSound = LoadSoundWithFallback(assetDir, "click", soundExtensions);
 
         // Load music with multiple format support
-        string[] musicExtensions = { ".wav", ".ogg", ".mp3", ".flac" };
+        string[] musicExtensions = { ".wav", ".ogg", ".mp3", ".flac", ".m4a", ".aac" };
         
         _musicLoaded = false;
         _bgMusic = LoadMusicWithFallback(assetDir, "untrust", musicExtensions, out _musicLoaded);
