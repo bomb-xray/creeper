@@ -368,11 +368,24 @@ public class Game : IDisposable
 
     private void DrawIntroScreen()
     {
-        float imgX = (_screenWidth - _introTexture.Width) / 2f;
-        float imgY = (_screenHeight - _introTexture.Height) / 2f - 60;
+        // Calculate scale to fit screen
+        float scaleX = (float)_screenWidth / _introTexture.Width;
+        float scaleY = (float)_screenHeight / _introTexture.Height;
+        float scale = MathF.Min(scaleX, scaleY); // Maintain aspect ratio
+
+        // Calculate centered position
+        float scaledWidth = _introTexture.Width * scale;
+        float scaledHeight = _introTexture.Height * scale;
+        float posX = (_screenWidth - scaledWidth) / 2f;
+        float posY = (_screenHeight - scaledHeight) / 2f - 30;
 
         Color tintColor = MakeColor(255, 255, 255, (int)(_introAlpha * 255));
-        Raylib.DrawTexture(_introTexture, (int)imgX, (int)imgY, tintColor);
+        
+        // Draw with scaling
+        Rectangle sourceRect = new Rectangle(0, 0, _introTexture.Width, _introTexture.Height);
+        Rectangle destRect = new Rectangle(posX, posY, scaledWidth, scaledHeight);
+        Vector2 origin = new Vector2(0, 0);
+        Raylib.DrawTexturePro(_introTexture, sourceRect, destRect, origin, 0f, tintColor);
 
         // "PRESS ANY KEY" text below image
         if (_state == GameState.IntroWaiting && _blinkVisible)
@@ -380,7 +393,7 @@ public class Game : IDisposable
             string text = "PRESS ANY KEY TO CONTINUE";
             int textWidth = Raylib.MeasureText(text, SubFontSize);
             float textX = (_screenWidth - textWidth) / 2f;
-            float textY = imgY + _introTexture.Height + 40;
+            float textY = posY + scaledHeight + 20;
 
             Color textColor = MakeColor(255, 255, 255, (int)(_introAlpha * 255));
             DrawPixelText(text, (int)textX, (int)textY, SubFontSize, textColor);
@@ -392,29 +405,59 @@ public class Game : IDisposable
         // Draw fading intro image
         if (_introAlpha > 0f)
         {
-            float imgX = (_screenWidth - _introTexture.Width) / 2f;
-            float imgY = (_screenHeight - _introTexture.Height) / 2f - 60;
+            float scaleX = (float)_screenWidth / _introTexture.Width;
+            float scaleY = (float)_screenHeight / _introTexture.Height;
+            float scale = MathF.Min(scaleX, scaleY);
+
+            float scaledWidth = _introTexture.Width * scale;
+            float scaledHeight = _introTexture.Height * scale;
+            float posX = (_screenWidth - scaledWidth) / 2f;
+            float posY = (_screenHeight - scaledHeight) / 2f - 30;
+
             Color tintColor = MakeColor(255, 255, 255, (int)(_introAlpha * 255));
-            Raylib.DrawTexture(_introTexture, (int)imgX, (int)imgY, tintColor);
+            Rectangle sourceRect = new Rectangle(0, 0, _introTexture.Width, _introTexture.Height);
+            Rectangle destRect = new Rectangle(posX, posY, scaledWidth, scaledHeight);
+            Vector2 origin = new Vector2(0, 0);
+            Raylib.DrawTexturePro(_introTexture, sourceRect, destRect, origin, 0f, tintColor);
         }
 
         // Draw fading in main image
         if (_mainAlpha > 0f)
         {
-            float imgX = (_screenWidth - _mainTexture.Width) / 2f;
-            float imgY = (_screenHeight - _mainTexture.Height) / 2f - 80;
+            float scaleX = (float)_screenWidth / _mainTexture.Width;
+            float scaleY = (float)_screenHeight / _mainTexture.Height;
+            float scale = MathF.Min(scaleX, scaleY);
+
+            float scaledWidth = _mainTexture.Width * scale;
+            float scaledHeight = _mainTexture.Height * scale;
+            float posX = (_screenWidth - scaledWidth) / 2f;
+            float posY = (_screenHeight - scaledHeight) / 2f - 40;
+
             Color tintColor = MakeColor(255, 255, 255, (int)(_mainAlpha * 255));
-            Raylib.DrawTexture(_mainTexture, (int)imgX, (int)imgY, tintColor);
+            Rectangle sourceRect = new Rectangle(0, 0, _mainTexture.Width, _mainTexture.Height);
+            Rectangle destRect = new Rectangle(posX, posY, scaledWidth, scaledHeight);
+            Vector2 origin = new Vector2(0, 0);
+            Raylib.DrawTexturePro(_mainTexture, sourceRect, destRect, origin, 0f, tintColor);
         }
     }
 
     private void DrawMainMenuScreen()
     {
-        // Draw main image
-        float imgX = (_screenWidth - _mainTexture.Width) / 2f;
-        float imgY = (_screenHeight - _mainTexture.Height) / 2f - 100;
+        // Draw main image (fitted to screen)
+        float scaleX = (float)_screenWidth / _mainTexture.Width;
+        float scaleY = (float)_screenHeight / _mainTexture.Height;
+        float scale = MathF.Min(scaleX, scaleY);
+
+        float scaledWidth = _mainTexture.Width * scale;
+        float scaledHeight = _mainTexture.Height * scale;
+        float imgX = (_screenWidth - scaledWidth) / 2f;
+        float imgY = (_screenHeight - scaledHeight) / 2f - 50;
+
         Color tintColor = MakeColor(255, 255, 255, (int)(_mainAlpha * 255));
-        Raylib.DrawTexture(_mainTexture, (int)imgX, (int)imgY, tintColor);
+        Rectangle sourceRect = new Rectangle(0, 0, _mainTexture.Width, _mainTexture.Height);
+        Rectangle destRect = new Rectangle(imgX, imgY, scaledWidth, scaledHeight);
+        Vector2 origin = new Vector2(0, 0);
+        Raylib.DrawTexturePro(_mainTexture, sourceRect, destRect, origin, 0f, tintColor);
 
         if (_showingOptions)
         {
@@ -424,7 +467,7 @@ public class Game : IDisposable
 
         // Draw menu options
         string[] options = { "PLAY", "OPTIONS", "EXIT" };
-        float menuStartY = _screenHeight / 2f + 80;
+        float menuStartY = imgY + scaledHeight + 20; // Position below the image
         float spacing = 60;
 
         for (int i = 0; i < options.Length; i++)
