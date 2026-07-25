@@ -74,6 +74,31 @@ public class Game : IDisposable
     // Helper: Load texture with multiple format fallback
     private Texture2D LoadTextureWithFallback(string dir, string baseName, string[] extensions)
     {
+        Console.WriteLine($"\n=== Searching for {baseName} texture ===");
+        Console.WriteLine($"Directory: {dir}");
+        
+        // List all files in directory for debugging
+        if (System.IO.Directory.Exists(dir))
+        {
+            var files = System.IO.Directory.GetFiles(dir, baseName + ".*");
+            if (files.Length > 0)
+            {
+                Console.WriteLine($"Found files:");
+                foreach (var f in files)
+                {
+                    Console.WriteLine($"  - {System.IO.Path.GetFileName(f)}");
+                }
+            }
+            else
+            {
+                Console.WriteLine($"No files found matching '{baseName}.*'");
+            }
+        }
+        else
+        {
+            Console.WriteLine($"Directory does not exist: {dir}");
+        }
+        
         foreach (string ext in extensions)
         {
             string path = System.IO.Path.Combine(dir, baseName + ext);
@@ -81,21 +106,25 @@ public class Game : IDisposable
             {
                 try
                 {
-                    Console.WriteLine($"Loading texture: {path}");
+                    Console.WriteLine($"Trying to load: {path}");
                     Texture2D tex = Raylib.LoadTexture(path);
                     if (tex.Width > 1)
                     {
-                        Console.WriteLine($"  -> Success: {tex.Width}x{tex.Height}");
+                        Console.WriteLine($"  -> SUCCESS: {tex.Width}x{tex.Height}");
                         return tex;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"  -> FAILED: Texture size is {tex.Width}x{tex.Height} (invalid)");
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"  -> Failed: {ex.Message}");
+                    Console.WriteLine($"  -> FAILED: {ex.Message}");
                 }
             }
         }
-        Console.WriteLine($"Warning: No valid {baseName} texture found");
+        Console.WriteLine($"WARNING: No valid {baseName} texture found");
         Image dummyImage = Raylib.GenImageColor(1, 1, Color.DarkGray);
         Texture2D dummy = Raylib.LoadTextureFromImage(dummyImage);
         Raylib.UnloadImage(dummyImage);
