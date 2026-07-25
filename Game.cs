@@ -175,11 +175,8 @@ public class Game : IDisposable
             {
                 Console.WriteLine($"Loading WAV music: {wavPath}");
                 _bgMusic = Raylib.LoadMusicStream(wavPath);
-                if (Raylib.IsMusicValid(_bgMusic))
-                {
-                    _musicLoaded = true;
-                    Console.WriteLine("WAV music loaded successfully!");
-                }
+                _musicLoaded = true;
+                Console.WriteLine("WAV music loaded!");
             }
             catch (Exception ex)
             {
@@ -194,11 +191,8 @@ public class Game : IDisposable
             {
                 Console.WriteLine($"Loading MP3 music: {mp3Path}");
                 _bgMusic = Raylib.LoadMusicStream(mp3Path);
-                if (Raylib.IsMusicValid(_bgMusic))
-                {
-                    _musicLoaded = true;
-                    Console.WriteLine("MP3 music loaded successfully!");
-                }
+                _musicLoaded = true;
+                Console.WriteLine("MP3 music loaded!");
             }
             catch (Exception ex)
             {
