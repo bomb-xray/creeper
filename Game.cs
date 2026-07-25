@@ -230,20 +230,47 @@ public class Game : IDisposable
             Raylib.UnloadImage(dummyImage);
         }
 
-        // Load click sound
-        string[] soundExtensions = { ".wav", ".ogg", ".mp3", ".flac" };
-        _clickSound = LoadSoundWithFallback(assetDir, "click", soundExtensions);
+        // Load click sound with auto-conversion
+        string clickPath = AudioConverter.EnsurePlayableAudio(assetDir, "click");
+        if (!string.IsNullOrEmpty(clickPath))
+        {
+            try
+            {
+                Console.WriteLine($"Loading sound: {clickPath}");
+                _clickSound = Raylib.LoadSound(clickPath);
+                Console.WriteLine($"  -> Sound loaded!");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  -> Sound load failed: {ex.Message}");
+            }
+        }
 
-        // Load music with multiple format support
-        // Note: Raylib supports WAV, OGG, MP3, FLAC. M4A/AAC NOT supported.
-        string[] musicExtensions = { ".ogg", ".wav", ".mp3", ".flac" };
+        // Load music with auto-conversion support
+        string musicPath = AudioConverter.EnsurePlayableAudio(assetDir, "untrust");
         
         _musicLoaded = false;
-        _bgMusic = LoadMusicWithFallback(assetDir, "untrust", musicExtensions, out _musicLoaded);
-        
-        if (_musicLoaded)
+        if (!string.IsNullOrEmpty(musicPath))
         {
-            Raylib.SetMusicVolume(_bgMusic, 0.7f);
+            try
+            {
+                Console.WriteLine($"Loading music: {musicPath}");
+                _bgMusic = Raylib.LoadMusicStream(musicPath);
+                if (_bgMusic.FrameCount > 0)
+                {
+                    _musicLoaded = true;
+                    Raylib.SetMusicVolume(_bgMusic, 0.7f);
+                    Console.WriteLine($"  -> Music loaded! (frames: {_bgMusic.FrameCount})");
+                }
+                else
+                {
+                    Console.WriteLine($"  -> Music load failed: empty or corrupted");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  -> Music load failed: {ex.Message}");
+            }
         }
         
         if (!_musicLoaded)
