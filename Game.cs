@@ -510,22 +510,10 @@ public class Game : IDisposable
 
     private void DrawMainMenuScreen()
     {
-        // Draw main image (fitted to screen, leaving space for menu)
-        float menuSpace = 200f; // Reserve space for menu at bottom
-        float availableHeight = _screenHeight - menuSpace;
-        
-        float scaleX = (float)_screenWidth / _mainTexture.Width;
-        float scaleY = availableHeight / _mainTexture.Height;
-        float scale = MathF.Min(scaleX, scaleY);
-
-        float scaledWidth = _mainTexture.Width * scale;
-        float scaledHeight = _mainTexture.Height * scale;
-        float imgX = (_screenWidth - scaledWidth) / 2f;
-        float imgY = (availableHeight - scaledHeight) / 2f + 20;
-
+        // Draw main image FULLSCREEN (stretch to fill)
         Color tintColor = MakeColor(255, 255, 255, (int)(_mainAlpha * 255));
         Rectangle sourceRect = new Rectangle(0, 0, _mainTexture.Width, _mainTexture.Height);
-        Rectangle destRect = new Rectangle(imgX, imgY, scaledWidth, scaledHeight);
+        Rectangle destRect = new Rectangle(0, 0, _screenWidth, _screenHeight);
         Vector2 origin = new Vector2(0, 0);
         Raylib.DrawTexturePro(_mainTexture, sourceRect, destRect, origin, 0f, tintColor);
 
@@ -537,7 +525,7 @@ public class Game : IDisposable
 
         // Draw menu options - FIXED position at bottom
         string[] options = { "PLAY", "OPTIONS", "EXIT" };
-        float menuStartY = _screenHeight - 220; // Higher position
+        float menuStartY = _screenHeight - 220;
         float spacing = 55;
 
         for (int i = 0; i < options.Length; i++)
