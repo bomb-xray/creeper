@@ -510,15 +510,18 @@ public class Game : IDisposable
 
     private void DrawMainMenuScreen()
     {
-        // Draw main image (fitted to screen)
+        // Draw main image (fitted to screen, leaving space for menu)
+        float menuSpace = 200f; // Reserve space for menu at bottom
+        float availableHeight = _screenHeight - menuSpace;
+        
         float scaleX = (float)_screenWidth / _mainTexture.Width;
-        float scaleY = (float)_screenHeight / _mainTexture.Height;
+        float scaleY = availableHeight / _mainTexture.Height;
         float scale = MathF.Min(scaleX, scaleY);
 
         float scaledWidth = _mainTexture.Width * scale;
         float scaledHeight = _mainTexture.Height * scale;
         float imgX = (_screenWidth - scaledWidth) / 2f;
-        float imgY = (_screenHeight - scaledHeight) / 2f - 50;
+        float imgY = (availableHeight - scaledHeight) / 2f + 20;
 
         Color tintColor = MakeColor(255, 255, 255, (int)(_mainAlpha * 255));
         Rectangle sourceRect = new Rectangle(0, 0, _mainTexture.Width, _mainTexture.Height);
@@ -532,10 +535,10 @@ public class Game : IDisposable
             return;
         }
 
-        // Draw menu options
+        // Draw menu options - FIXED position at bottom
         string[] options = { "PLAY", "OPTIONS", "EXIT" };
-        float menuStartY = imgY + scaledHeight + 20; // Position below the image
-        float spacing = 60;
+        float menuStartY = _screenHeight - 160; // Fixed position from bottom
+        float spacing = 50;
 
         for (int i = 0; i < options.Length; i++)
         {
