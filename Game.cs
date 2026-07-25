@@ -537,8 +537,8 @@ public class Game : IDisposable
 
         // Draw menu options - FIXED position at bottom
         string[] options = { "PLAY", "OPTIONS", "EXIT" };
-        float menuStartY = _screenHeight - 160; // Fixed position from bottom
-        float spacing = 50;
+        float menuStartY = _screenHeight - 220; // Higher position
+        float spacing = 55;
 
         for (int i = 0; i < options.Length; i++)
         {
