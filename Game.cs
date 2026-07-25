@@ -1,10 +1,6 @@
 using Raylib_cs;
 using System;
 using System.Numerics;
-using static Raylib_cs.Raylib;
-using static Raylib_cs.Color;
-using static Raylib_cs.KeyboardKey;
-using static Raylib_cs.MouseButton;
 
 namespace CreeperGame;
 
@@ -68,6 +64,12 @@ public class Game : IDisposable
 
     private bool _disposed = false;
 
+    // Helper: create Color with explicit byte cast to avoid ambiguity
+    private static Color MakeColor(int r, int g, int b, int a)
+    {
+        return new Color((byte)r, (byte)g, (byte)b, (byte)a);
+    }
+
     public void Run()
     {
         Initialize();
@@ -78,46 +80,43 @@ public class Game : IDisposable
     private void Initialize()
     {
         // Fullscreen mode
-        SetConfigFlags(ConfigFlags.FLAG_FULLSCREEN_MODE);
-        SetConfigFlags(ConfigFlags.FLAG_VSYNC_HINT);
+        Raylib.SetConfigFlags(ConfigFlags.FullscreenMode | ConfigFlags.VsyncHint);
+        Raylib.InitWindow(0, 0, "Creeper");
 
-        InitWindow(0, 0, "Creeper");
-
-        _screenWidth = GetScreenWidth();
-        _screenHeight = GetScreenHeight();
+        _screenWidth = Raylib.GetScreenWidth();
+        _screenHeight = Raylib.GetScreenHeight();
 
         // Hide cursor
-        HideCursor();
-        DisableCursor();
+        Raylib.HideCursor();
+        Raylib.DisableCursor();
 
         // Audio
-        InitAudioDevice();
+        Raylib.InitAudioDevice();
 
         // Load assets
-        _introTexture = LoadTexture("assets/image.png");
-        _mainTexture = LoadTexture("assets/negro.png");
-        _clickSound = LoadSound("assets/click.wav");
-        
+        _introTexture = Raylib.LoadTexture("assets/image.png");
+        _mainTexture = Raylib.LoadTexture("assets/negro.png");
+        _clickSound = Raylib.LoadSound("assets/click.wav");
+
         // Try to load MP3 first, fall back to WAV
         if (System.IO.File.Exists("assets/untrust.mp3"))
         {
-            _bgMusic = LoadMusicStream("assets/untrust.mp3");
+            _bgMusic = Raylib.LoadMusicStream("assets/untrust.mp3");
         }
         else
         {
-            _bgMusic = LoadMusicStream("assets/untrust.wav");
+            _bgMusic = Raylib.LoadMusicStream("assets/untrust.wav");
         }
 
-        SetMusicVolume(_bgMusic, 0.7f);
-
-        SetTargetFPS(60);
+        Raylib.SetMusicVolume(_bgMusic, 0.7f);
+        Raylib.SetTargetFPS(60);
     }
 
     private void GameLoop()
     {
-        while (!WindowShouldClose())
+        while (!Raylib.WindowShouldClose())
         {
-            float dt = GetFrameTime();
+            float dt = Raylib.GetFrameTime();
             Update(dt);
             Draw();
         }
@@ -125,24 +124,15 @@ public class Game : IDisposable
 
     private void Update(float dt)
     {
-        // Allow ESC to quit at any time
-        if (IsKeyPressed(KEY_ESCAPE))
+        // Allow ESC to quit / go back
+        if (Raylib.IsKeyPressed(KeyboardKey.Escape))
         {
             if (_showingOptions)
             {
                 _showingOptions = false;
                 return;
             }
-
-            if (_state == GameState.MainMenu)
-            {
-                // Go back to intro? Or just close
-                Environment.Exit(0);
-            }
-            else
-            {
-                Environment.Exit(0);
-            }
+            Environment.Exit(0);
         }
 
         switch (_state)
@@ -150,15 +140,12 @@ public class Game : IDisposable
             case GameState.IntroFadeIn:
                 UpdateIntroFadeIn(dt);
                 break;
-
             case GameState.IntroWaiting:
                 UpdateIntroWaiting(dt);
                 break;
-
             case GameState.Transition:
                 UpdateTransition(dt);
                 break;
-
             case GameState.MainMenu:
                 UpdateMainMenu(dt);
                 break;
@@ -186,12 +173,11 @@ public class Game : IDisposable
         }
 
         // Check for any key press
-        int key = GetKeyPressed();
-        if (key > 0 || IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+        int key = Raylib.GetKeyPressed();
+        if (key > 0 || Raylib.IsMouseButtonPressed(MouseButton.Left))
         {
-            // Start transition
             _state = GameState.Transition;
-            PlaySound(_clickSound);
+            Raylib.PlaySound(_clickSound);
             _transitionTimer = 0f;
         }
     }
@@ -212,9 +198,9 @@ public class Game : IDisposable
         }
 
         // Start music when main image appears
-        if (_transitionTimer > mainFadeStart && !IsMusicStreamPlaying(_bgMusic))
+        if (_transitionTimer > mainFadeStart && !Raylib.IsMusicStreamPlaying(_bgMusic))
         {
-            PlayMusicStream(_bgMusic);
+            Raylib.PlayMusicStream(_bgMusic);
         }
 
         if (_transitionTimer >= _transitionDuration)
@@ -226,17 +212,17 @@ public class Game : IDisposable
             _optionAlphas = new float[3] { 0f, 0f, 0f };
         }
 
-        UpdateMusicStream(_bgMusic);
+        Raylib.UpdateMusicStream(_bgMusic);
     }
 
     private void UpdateMainMenu(float dt)
     {
-        UpdateMusicStream(_bgMusic);
+        Raylib.UpdateMusicStream(_bgMusic);
 
         // Loop music
-        if (!IsMusicStreamPlaying(_bgMusic))
+        if (!Raylib.IsMusicStreamPlaying(_bgMusic))
         {
-            PlayMusicStream(_bgMusic);
+            Raylib.PlayMusicStream(_bgMusic);
         }
 
         if (_showingOptions)
@@ -257,23 +243,23 @@ public class Game : IDisposable
         }
 
         // Navigation
-        if (IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_W))
+        if (Raylib.IsKeyPressed(KeyboardKey.Up) || Raylib.IsKeyPressed(KeyboardKey.W))
         {
             int prev = (int)_selectedOption;
             _selectedOption = (MenuOption)((prev - 1 + 3) % 3);
-            PlaySound(_clickSound);
+            Raylib.PlaySound(_clickSound);
         }
 
-        if (IsKeyPressed(KEY_DOWN) || IsKeyPressed(KEY_S))
+        if (Raylib.IsKeyPressed(KeyboardKey.Down) || Raylib.IsKeyPressed(KeyboardKey.S))
         {
             int next = (int)_selectedOption;
             _selectedOption = (MenuOption)((next + 1) % 3);
-            PlaySound(_clickSound);
+            Raylib.PlaySound(_clickSound);
         }
 
-        if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE))
+        if (Raylib.IsKeyPressed(KeyboardKey.Enter) || Raylib.IsKeyPressed(KeyboardKey.Space))
         {
-            PlaySound(_clickSound);
+            Raylib.PlaySound(_clickSound);
             switch (_selectedOption)
             {
                 case MenuOption.Play:
@@ -292,21 +278,21 @@ public class Game : IDisposable
 
     private void UpdateOptionsScreen(float dt)
     {
-        if (IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_W))
+        if (Raylib.IsKeyPressed(KeyboardKey.Up) || Raylib.IsKeyPressed(KeyboardKey.W))
         {
             _optionsSelected = (_optionsSelected - 1 + 2) % 2;
-            PlaySound(_clickSound);
+            Raylib.PlaySound(_clickSound);
         }
 
-        if (IsKeyPressed(KEY_DOWN) || IsKeyPressed(KEY_S))
+        if (Raylib.IsKeyPressed(KeyboardKey.Down) || Raylib.IsKeyPressed(KeyboardKey.S))
         {
             _optionsSelected = (_optionsSelected + 1) % 2;
-            PlaySound(_clickSound);
+            Raylib.PlaySound(_clickSound);
         }
 
-        if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE))
+        if (Raylib.IsKeyPressed(KeyboardKey.Enter) || Raylib.IsKeyPressed(KeyboardKey.Space))
         {
-            PlaySound(_clickSound);
+            Raylib.PlaySound(_clickSound);
             switch (_optionsSelected)
             {
                 case 0: // Back
@@ -321,8 +307,8 @@ public class Game : IDisposable
 
     private void Draw()
     {
-        BeginDrawing();
-        ClearBackground(BLACK);
+        Raylib.BeginDrawing();
+        Raylib.ClearBackground(Color.Black);
 
         switch (_state)
         {
@@ -330,11 +316,9 @@ public class Game : IDisposable
             case GameState.IntroWaiting:
                 DrawIntroScreen();
                 break;
-
             case GameState.Transition:
                 DrawTransitionScreen();
                 break;
-
             case GameState.MainMenu:
                 DrawMainMenuScreen();
                 break;
@@ -345,22 +329,21 @@ public class Game : IDisposable
 
     private void DrawIntroScreen()
     {
-        // Draw centered intro image with alpha
         float imgX = (_screenWidth - _introTexture.Width) / 2f;
         float imgY = (_screenHeight - _introTexture.Height) / 2f - 60;
 
-        Color tintColor = new Color(255, 255, 255, (byte)(_introAlpha * 255));
-        DrawTexture(_introTexture, (int)imgX, (int)imgY, tintColor);
+        Color tintColor = MakeColor(255, 255, 255, (int)(_introAlpha * 255));
+        Raylib.DrawTexture(_introTexture, (int)imgX, (int)imgY, tintColor);
 
         // "PRESS ANY KEY" text below image
         if (_state == GameState.IntroWaiting && _blinkVisible)
         {
             string text = "PRESS ANY KEY TO CONTINUE";
-            int textWidth = MeasureText(text, SubFontSize);
+            int textWidth = Raylib.MeasureText(text, SubFontSize);
             float textX = (_screenWidth - textWidth) / 2f;
             float textY = imgY + _introTexture.Height + 40;
 
-            Color textColor = new Color(255, 255, 255, (byte)(_introAlpha * 255));
+            Color textColor = MakeColor(255, 255, 255, (int)(_introAlpha * 255));
             DrawPixelText(text, (int)textX, (int)textY, SubFontSize, textColor);
         }
     }
@@ -372,8 +355,8 @@ public class Game : IDisposable
         {
             float imgX = (_screenWidth - _introTexture.Width) / 2f;
             float imgY = (_screenHeight - _introTexture.Height) / 2f - 60;
-            Color tintColor = new Color(255, 255, 255, (byte)(_introAlpha * 255));
-            DrawTexture(_introTexture, (int)imgX, (int)imgY, tintColor);
+            Color tintColor = MakeColor(255, 255, 255, (int)(_introAlpha * 255));
+            Raylib.DrawTexture(_introTexture, (int)imgX, (int)imgY, tintColor);
         }
 
         // Draw fading in main image
@@ -381,18 +364,18 @@ public class Game : IDisposable
         {
             float imgX = (_screenWidth - _mainTexture.Width) / 2f;
             float imgY = (_screenHeight - _mainTexture.Height) / 2f - 80;
-            Color tintColor = new Color(255, 255, 255, (byte)(_mainAlpha * 255));
-            DrawTexture(_mainTexture, (int)imgX, (int)imgY, tintColor);
+            Color tintColor = MakeColor(255, 255, 255, (int)(_mainAlpha * 255));
+            Raylib.DrawTexture(_mainTexture, (int)imgX, (int)imgY, tintColor);
         }
     }
 
     private void DrawMainMenuScreen()
     {
-        // Draw main image (background-ish)
+        // Draw main image
         float imgX = (_screenWidth - _mainTexture.Width) / 2f;
         float imgY = (_screenHeight - _mainTexture.Height) / 2f - 100;
-        Color tintColor = new Color(255, 255, 255, (byte)(_mainAlpha * 255));
-        DrawTexture(_mainTexture, (int)imgX, (int)imgY, tintColor);
+        Color tintColor = MakeColor(255, 255, 255, (int)(_mainAlpha * 255));
+        Raylib.DrawTexture(_mainTexture, (int)imgX, (int)imgY, tintColor);
 
         if (_showingOptions)
         {
@@ -413,28 +396,23 @@ public class Game : IDisposable
             bool selected = (i == (int)_selectedOption);
             string displayText = options[i];
 
-            // Pixel-style text
-            int textWidth = MeasureText(displayText, MenuFontSize);
+            int textWidth = Raylib.MeasureText(displayText, MenuFontSize);
             float textX = (_screenWidth - textWidth) / 2f;
             float textY = menuStartY + (i * spacing);
 
-            // Color
             Color textColor;
             if (selected)
             {
-                // Highlight with red / crimson
-                textColor = new Color(220, 40, 40, (byte)(alpha * 255));
+                textColor = MakeColor(220, 40, 40, (int)(alpha * 255));
                 // Draw selector arrows
-                string leftArrow = ">";
-                string rightArrow = "<";
                 int arrowOffset = 40;
-                Color arrowColor = new Color(220, 40, 40, (byte)(alpha * 255));
-                DrawPixelText(leftArrow, (int)(textX - arrowOffset), (int)textY, MenuFontSize, arrowColor);
-                DrawPixelText(rightArrow, (int)(textX + textWidth + arrowOffset - 20), (int)textY, MenuFontSize, arrowColor);
+                Color arrowColor = MakeColor(220, 40, 40, (int)(alpha * 255));
+                DrawPixelText(">", (int)(textX - arrowOffset), (int)textY, MenuFontSize, arrowColor);
+                DrawPixelText("<", (int)(textX + textWidth + arrowOffset - 20), (int)textY, MenuFontSize, arrowColor);
             }
             else
             {
-                textColor = new Color(200, 200, 200, (byte)(alpha * 200));
+                textColor = MakeColor(200, 200, 200, (int)(alpha * 200));
             }
 
             DrawPixelText(displayText, (int)textX, (int)textY, MenuFontSize, textColor);
@@ -443,8 +421,8 @@ public class Game : IDisposable
             if (i == 0 && selected)
             {
                 string hint = "(coming soon)";
-                int hintWidth = MeasureText(hint, 16);
-                Color hintColor = new Color(150, 150, 150, (byte)(alpha * 180));
+                int hintWidth = Raylib.MeasureText(hint, 16);
+                Color hintColor = MakeColor(150, 150, 150, (int)(alpha * 180));
                 DrawPixelText(hint, (int)((_screenWidth - hintWidth) / 2f), (int)(textY + spacing - 15), 16, hintColor);
             }
         }
@@ -453,12 +431,12 @@ public class Game : IDisposable
     private void DrawOptionsScreen()
     {
         // Semi-transparent overlay
-        DrawRectangle(0, 0, _screenWidth, _screenHeight, new Color(0, 0, 0, 200));
+        Raylib.DrawRectangle(0, 0, _screenWidth, _screenHeight, MakeColor(0, 0, 0, 200));
 
         // Title
         string title = "OPTIONS";
-        int titleWidth = MeasureText(title, TitleFontSize);
-        DrawPixelText(title, (_screenWidth - titleWidth) / 2, _screenHeight / 2 - 120, TitleFontSize, WHITE);
+        int titleWidth = Raylib.MeasureText(title, TitleFontSize);
+        DrawPixelText(title, (_screenWidth - titleWidth) / 2, _screenHeight / 2 - 120, TitleFontSize, Color.White);
 
         // Options
         string[] opts = { "BACK", "CREDITS" };
@@ -468,50 +446,47 @@ public class Game : IDisposable
         for (int i = 0; i < opts.Length; i++)
         {
             bool selected = (i == _optionsSelected);
-            int tw = MeasureText(opts[i], MenuFontSize);
+            int tw = Raylib.MeasureText(opts[i], MenuFontSize);
             float tx = (_screenWidth - tw) / 2f;
             float ty = startY + (i * spacing);
 
-            Color col = selected ? new Color(220, 40, 40, 255) : new Color(200, 200, 200, 200);
+            Color col = selected ? MakeColor(220, 40, 40, 255) : MakeColor(200, 200, 200, 200);
             DrawPixelText(opts[i], (int)tx, (int)ty, MenuFontSize, col);
 
             if (selected)
             {
-                DrawPixelText(">", (int)(tx - 40), (int)ty, MenuFontSize, new Color(220, 40, 40, 255));
-                DrawPixelText("<", (int)(tx + tw + 20), (int)ty, MenuFontSize, new Color(220, 40, 40, 255));
+                DrawPixelText(">", (int)(tx - 40), (int)ty, MenuFontSize, MakeColor(220, 40, 40, 255));
+                DrawPixelText("<", (int)(tx + tw + 20), (int)ty, MenuFontSize, MakeColor(220, 40, 40, 255));
             }
         }
 
         // Hint
         string hint = "PRESS ESC TO GO BACK";
-        int hw = MeasureText(hint, 18);
-        DrawPixelText(hint, (_screenWidth - hw) / 2, _screenHeight - 60, 18, new Color(120, 120, 120, 255));
+        int hw = Raylib.MeasureText(hint, 18);
+        DrawPixelText(hint, (_screenWidth - hw) / 2, _screenHeight - 60, 18, MakeColor(120, 120, 120, 255));
     }
 
     /// <summary>
-    /// Draws text in a pixelated/blocky style using the default Raylib font
-    /// with integer-scaled positioning for crisp pixel look.
+    /// Draws text with pixel-snapped positioning for crisp pixel look.
     /// </summary>
     private void DrawPixelText(string text, int x, int y, int fontSize, Color color)
     {
-        // Snap to pixel grid for crisp rendering
+        // Snap to pixel grid
         x = x - (x % 2);
         y = y - (y % 2);
         fontSize = fontSize - (fontSize % 2);
-
-        // Use default font with integer spacing
-        DrawText(text, x, y, fontSize, color);
+        Raylib.DrawText(text, x, y, fontSize, color);
     }
 
     private void Cleanup()
     {
-        StopMusicStream(_bgMusic);
-        UnloadMusicStream(_bgMusic);
-        UnloadSound(_clickSound);
-        UnloadTexture(_introTexture);
-        UnloadTexture(_mainTexture);
-        CloseAudioDevice();
-        CloseWindow();
+        Raylib.StopMusicStream(_bgMusic);
+        Raylib.UnloadMusicStream(_bgMusic);
+        Raylib.UnloadSound(_clickSound);
+        Raylib.UnloadTexture(_introTexture);
+        Raylib.UnloadTexture(_mainTexture);
+        Raylib.CloseAudioDevice();
+        Raylib.CloseWindow();
     }
 
     public void Dispose()
