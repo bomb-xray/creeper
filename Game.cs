@@ -32,6 +32,7 @@ public class Game : IDisposable
     // Audio
     private Sound _clickSound;
     private Music _bgMusic;
+    private bool _musicLoaded = false;
 
     // State
     private GameState _state = GameState.IntroFadeIn;
@@ -118,36 +119,83 @@ public class Game : IDisposable
             assetDir = "assets"; // fallback
         }
 
-        _introTexture = Raylib.LoadTexture(System.IO.Path.Combine(assetDir, "image.png"));
-        _mainTexture = Raylib.LoadTexture(System.IO.Path.Combine(assetDir, "negro.png"));
-        _clickSound = Raylib.LoadSound(System.IO.Path.Combine(assetDir, "click.wav"));
+        // Load textures with fallback
+        string imagePath = System.IO.Path.Combine(assetDir, "image.png");
+        string negroPath = System.IO.Path.Combine(assetDir, "negro.png");
+        string clickPath = System.IO.Path.Combine(assetDir, "click.wav");
 
-        // Try to load MP3 first, fall back to WAV
+        try
+        {
+            _introTexture = Raylib.LoadTexture(imagePath);
+            // Check if texture loaded properly (default texture is 1x1)
+            if (_introTexture.Width <= 1)
+            {
+                Console.WriteLine($"Warning: image.png failed to load properly, using negro.png as fallback");
+                _introTexture = Raylib.LoadTexture(negroPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Warning: Failed to load image.png: {ex.Message}");
+            _introTexture = Raylib.LoadTexture(negroPath);
+        }
+
+        try
+        {
+            _mainTexture = Raylib.LoadTexture(negroPath);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error: Failed to load negro.png: {ex.Message}");
+            // Create a dummy 1x1 texture
+            Image dummyImage = Raylib.GenImageColor(1, 1, Color.DarkGray);
+            _mainTexture = Raylib.LoadTextureFromImage(dummyImage);
+            Raylib.UnloadImage(dummyImage);
+        }
+
+        try
+        {
+            _clickSound = Raylib.LoadSound(clickPath);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Warning: Failed to load click.wav: {ex.Message}");
+        }
+
+        // Try to load music with proper error handling
         string mp3Path = System.IO.Path.Combine(assetDir, "untrust.mp3");
         string wavPath = System.IO.Path.Combine(assetDir, "untrust.wav");
         
-        if (System.IO.File.Exists(mp3Path))
+        _musicLoaded = false;
+        try
         {
-            _bgMusic = Raylib.LoadMusicStream(mp3Path);
-        }
-        else if (System.IO.File.Exists(wavPath))
-        {
-            _bgMusic = Raylib.LoadMusicStream(wavPath);
-        }
-        else
-        {
-            // Try loading anyway in case Raylib can find it
-            try
+            if (System.IO.File.Exists(mp3Path))
             {
+                Console.WriteLine($"Loading music: {mp3Path}");
                 _bgMusic = Raylib.LoadMusicStream(mp3Path);
+                _musicLoaded = true;
             }
-            catch
+            else if (System.IO.File.Exists(wavPath))
             {
+                Console.WriteLine($"Loading music: {wavPath}");
                 _bgMusic = Raylib.LoadMusicStream(wavPath);
+                _musicLoaded = true;
             }
+            else
+            {
+                Console.WriteLine("Warning: No music file found (untrust.mp3 or untrust.wav)");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Warning: Failed to load music: {ex.Message}");
+            _musicLoaded = false;
         }
 
-        Raylib.SetMusicVolume(_bgMusic, 0.7f);
+        if (_musicLoaded)
+        {
+            Raylib.SetMusicVolume(_bgMusic, 0.7f);
+        }
         Raylib.SetTargetFPS(60);
     }
 
@@ -237,7 +285,7 @@ public class Game : IDisposable
         }
 
         // Start music when main image appears
-        if (_transitionTimer > mainFadeStart && !Raylib.IsMusicStreamPlaying(_bgMusic))
+        if (_transitionTimer > mainFadeStart && _musicLoaded && !Raylib.IsMusicStreamPlaying(_bgMusic))
         {
             Raylib.PlayMusicStream(_bgMusic);
         }
@@ -251,17 +299,23 @@ public class Game : IDisposable
             _optionAlphas = new float[3] { 0f, 0f, 0f };
         }
 
-        Raylib.UpdateMusicStream(_bgMusic);
+        if (_musicLoaded)
+        {
+            Raylib.UpdateMusicStream(_bgMusic);
+        }
     }
 
     private void UpdateMainMenu(float dt)
     {
-        Raylib.UpdateMusicStream(_bgMusic);
-
-        // Loop music
-        if (!Raylib.IsMusicStreamPlaying(_bgMusic))
+        if (_musicLoaded)
         {
-            Raylib.PlayMusicStream(_bgMusic);
+            Raylib.UpdateMusicStream(_bgMusic);
+
+            // Loop music
+            if (!Raylib.IsMusicStreamPlaying(_bgMusic))
+            {
+                Raylib.PlayMusicStream(_bgMusic);
+            }
         }
 
         if (_showingOptions)
@@ -562,8 +616,11 @@ public class Game : IDisposable
 
     private void Cleanup()
     {
-        Raylib.StopMusicStream(_bgMusic);
-        Raylib.UnloadMusicStream(_bgMusic);
+        if (_musicLoaded)
+        {
+            Raylib.StopMusicStream(_bgMusic);
+            Raylib.UnloadMusicStream(_bgMusic);
+        }
         Raylib.UnloadSound(_clickSound);
         Raylib.UnloadTexture(_introTexture);
         Raylib.UnloadTexture(_mainTexture);
