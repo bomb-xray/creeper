@@ -94,18 +94,57 @@ public class Game : IDisposable
         Raylib.InitAudioDevice();
 
         // Load assets
-        _introTexture = Raylib.LoadTexture("assets/image.png");
-        _mainTexture = Raylib.LoadTexture("assets/negro.png");
-        _clickSound = Raylib.LoadSound("assets/click.wav");
+        // Try different paths for assets
+        string[] assetPaths = {
+            "assets",
+            "../../../assets",
+            "../../assets",
+            "../assets",
+            System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets")
+        };
+
+        string assetDir = "";
+        foreach (string path in assetPaths)
+        {
+            if (System.IO.Directory.Exists(path))
+            {
+                assetDir = path;
+                break;
+            }
+        }
+
+        if (string.IsNullOrEmpty(assetDir))
+        {
+            assetDir = "assets"; // fallback
+        }
+
+        _introTexture = Raylib.LoadTexture(System.IO.Path.Combine(assetDir, "image.png"));
+        _mainTexture = Raylib.LoadTexture(System.IO.Path.Combine(assetDir, "negro.png"));
+        _clickSound = Raylib.LoadSound(System.IO.Path.Combine(assetDir, "click.wav"));
 
         // Try to load MP3 first, fall back to WAV
-        if (System.IO.File.Exists("assets/untrust.mp3"))
+        string mp3Path = System.IO.Path.Combine(assetDir, "untrust.mp3");
+        string wavPath = System.IO.Path.Combine(assetDir, "untrust.wav");
+        
+        if (System.IO.File.Exists(mp3Path))
         {
-            _bgMusic = Raylib.LoadMusicStream("assets/untrust.mp3");
+            _bgMusic = Raylib.LoadMusicStream(mp3Path);
+        }
+        else if (System.IO.File.Exists(wavPath))
+        {
+            _bgMusic = Raylib.LoadMusicStream(wavPath);
         }
         else
         {
-            _bgMusic = Raylib.LoadMusicStream("assets/untrust.wav");
+            // Try loading anyway in case Raylib can find it
+            try
+            {
+                _bgMusic = Raylib.LoadMusicStream(mp3Path);
+            }
+            catch
+            {
+                _bgMusic = Raylib.LoadMusicStream(wavPath);
+            }
         }
 
         Raylib.SetMusicVolume(_bgMusic, 0.7f);
