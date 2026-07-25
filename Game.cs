@@ -71,6 +71,86 @@ public class Game : IDisposable
         return new Color((byte)r, (byte)g, (byte)b, (byte)a);
     }
 
+    // Helper: Load texture with multiple format fallback
+    private Texture2D LoadTextureWithFallback(string dir, string baseName, string[] extensions)
+    {
+        foreach (string ext in extensions)
+        {
+            string path = System.IO.Path.Combine(dir, baseName + ext);
+            if (System.IO.File.Exists(path))
+            {
+                try
+                {
+                    Console.WriteLine($"Loading texture: {path}");
+                    Texture2D tex = Raylib.LoadTexture(path);
+                    if (tex.Width > 1)
+                    {
+                        Console.WriteLine($"  -> Success: {tex.Width}x{tex.Height}");
+                        return tex;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"  -> Failed: {ex.Message}");
+                }
+            }
+        }
+        Console.WriteLine($"Warning: No valid {baseName} texture found");
+        Image dummyImage = Raylib.GenImageColor(1, 1, Color.DarkGray);
+        Texture2D dummy = Raylib.LoadTextureFromImage(dummyImage);
+        Raylib.UnloadImage(dummyImage);
+        return dummy;
+    }
+
+    // Helper: Load sound with multiple format fallback
+    private Sound LoadSoundWithFallback(string dir, string baseName, string[] extensions)
+    {
+        foreach (string ext in extensions)
+        {
+            string path = System.IO.Path.Combine(dir, baseName + ext);
+            if (System.IO.File.Exists(path))
+            {
+                try
+                {
+                    Console.WriteLine($"Loading sound: {path}");
+                    return Raylib.LoadSound(path);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"  -> Failed: {ex.Message}");
+                }
+            }
+        }
+        Console.WriteLine($"Warning: No valid {baseName} sound found");
+        return new Sound();
+    }
+
+    // Helper: Load music with multiple format fallback
+    private Music LoadMusicWithFallback(string dir, string baseName, string[] extensions, out bool loaded)
+    {
+        loaded = false;
+        foreach (string ext in extensions)
+        {
+            string path = System.IO.Path.Combine(dir, baseName + ext);
+            if (System.IO.File.Exists(path))
+            {
+                try
+                {
+                    Console.WriteLine($"Loading music: {path}");
+                    Music music = Raylib.LoadMusicStream(path);
+                    loaded = true;
+                    Console.WriteLine($"  -> Success!");
+                    return music;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"  -> Failed: {ex.Message}");
+                }
+            }
+        }
+        return new Music();
+    }
+
     public void Run()
     {
         Initialize();
@@ -119,95 +199,46 @@ public class Game : IDisposable
             assetDir = "assets"; // fallback
         }
 
-        // Load textures with fallback
-        string imagePath = System.IO.Path.Combine(assetDir, "image.png");
-        string negroPath = System.IO.Path.Combine(assetDir, "negro.png");
-        string clickPath = System.IO.Path.Combine(assetDir, "click.wav");
-
-        try
+        // Load textures with multiple format support
+        string[] imageExtensions = { ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tga" };
+        string[] negroExtensions = { ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tga" };
+        
+        // Try to load image (intro)
+        _introTexture = LoadTextureWithFallback(assetDir, "image", imageExtensions);
+        if (_introTexture.Width <= 1)
         {
-            _introTexture = Raylib.LoadTexture(imagePath);
-            // Check if texture loaded properly (default texture is 1x1)
-            if (_introTexture.Width <= 1)
-            {
-                Console.WriteLine($"Warning: image.png failed to load properly, using negro.png as fallback");
-                _introTexture = Raylib.LoadTexture(negroPath);
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Warning: Failed to load image.png: {ex.Message}");
-            _introTexture = Raylib.LoadTexture(negroPath);
+            Console.WriteLine("Warning: image not found or failed to load, using negro as fallback");
+            _introTexture = LoadTextureWithFallback(assetDir, "negro", negroExtensions);
         }
 
-        try
+        // Try to load negro (main menu)
+        _mainTexture = LoadTextureWithFallback(assetDir, "negro", negroExtensions);
+        if (_mainTexture.Width <= 1)
         {
-            _mainTexture = Raylib.LoadTexture(negroPath);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error: Failed to load negro.png: {ex.Message}");
-            // Create a dummy 1x1 texture
+            Console.WriteLine("Error: negro image not found, creating dummy texture");
             Image dummyImage = Raylib.GenImageColor(1, 1, Color.DarkGray);
             _mainTexture = Raylib.LoadTextureFromImage(dummyImage);
             Raylib.UnloadImage(dummyImage);
         }
 
-        try
-        {
-            _clickSound = Raylib.LoadSound(clickPath);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Warning: Failed to load click.wav: {ex.Message}");
-        }
+        // Load click sound
+        string[] soundExtensions = { ".wav", ".ogg", ".mp3", ".flac" };
+        _clickSound = LoadSoundWithFallback(assetDir, "click", soundExtensions);
 
-        // Try to load music - WAV first (more stable), then MP3
-        string mp3Path = System.IO.Path.Combine(assetDir, "untrust.mp3");
-        string wavPath = System.IO.Path.Combine(assetDir, "untrust.wav");
+        // Load music with multiple format support
+        string[] musicExtensions = { ".wav", ".ogg", ".mp3", ".flac" };
         
         _musicLoaded = false;
+        _bgMusic = LoadMusicWithFallback(assetDir, "untrust", musicExtensions, out _musicLoaded);
         
-        // Try WAV first (more stable than MP3 in Raylib)
-        if (System.IO.File.Exists(wavPath))
+        if (_musicLoaded)
         {
-            try
-            {
-                Console.WriteLine($"Loading WAV music: {wavPath}");
-                _bgMusic = Raylib.LoadMusicStream(wavPath);
-                _musicLoaded = true;
-                Console.WriteLine("WAV music loaded!");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"WAV load failed: {ex.Message}");
-            }
-        }
-        
-        // If WAV didn't work, try MP3
-        if (!_musicLoaded && System.IO.File.Exists(mp3Path))
-        {
-            try
-            {
-                Console.WriteLine($"Loading MP3 music: {mp3Path}");
-                _bgMusic = Raylib.LoadMusicStream(mp3Path);
-                _musicLoaded = true;
-                Console.WriteLine("MP3 music loaded!");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"MP3 load failed: {ex.Message}");
-            }
+            Raylib.SetMusicVolume(_bgMusic, 0.7f);
         }
         
         if (!_musicLoaded)
         {
             Console.WriteLine("Warning: Could not load any music file. Game will run without music.");
-        }
-
-        if (_musicLoaded)
-        {
-            Raylib.SetMusicVolume(_bgMusic, 0.7f);
         }
         Raylib.SetTargetFPS(60);
     }
