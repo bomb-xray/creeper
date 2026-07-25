@@ -162,34 +162,53 @@ public class Game : IDisposable
             Console.WriteLine($"Warning: Failed to load click.wav: {ex.Message}");
         }
 
-        // Try to load music with proper error handling
+        // Try to load music - WAV first (more stable), then MP3
         string mp3Path = System.IO.Path.Combine(assetDir, "untrust.mp3");
         string wavPath = System.IO.Path.Combine(assetDir, "untrust.wav");
         
         _musicLoaded = false;
-        try
+        
+        // Try WAV first (more stable than MP3 in Raylib)
+        if (System.IO.File.Exists(wavPath))
         {
-            if (System.IO.File.Exists(mp3Path))
+            try
             {
-                Console.WriteLine($"Loading music: {mp3Path}");
-                _bgMusic = Raylib.LoadMusicStream(mp3Path);
-                _musicLoaded = true;
-            }
-            else if (System.IO.File.Exists(wavPath))
-            {
-                Console.WriteLine($"Loading music: {wavPath}");
+                Console.WriteLine($"Loading WAV music: {wavPath}");
                 _bgMusic = Raylib.LoadMusicStream(wavPath);
-                _musicLoaded = true;
+                if (Raylib.IsMusicValid(_bgMusic))
+                {
+                    _musicLoaded = true;
+                    Console.WriteLine("WAV music loaded successfully!");
+                }
             }
-            else
+            catch (Exception ex)
             {
-                Console.WriteLine("Warning: No music file found (untrust.mp3 or untrust.wav)");
+                Console.WriteLine($"WAV load failed: {ex.Message}");
             }
         }
-        catch (Exception ex)
+        
+        // If WAV didn't work, try MP3
+        if (!_musicLoaded && System.IO.File.Exists(mp3Path))
         {
-            Console.WriteLine($"Warning: Failed to load music: {ex.Message}");
-            _musicLoaded = false;
+            try
+            {
+                Console.WriteLine($"Loading MP3 music: {mp3Path}");
+                _bgMusic = Raylib.LoadMusicStream(mp3Path);
+                if (Raylib.IsMusicValid(_bgMusic))
+                {
+                    _musicLoaded = true;
+                    Console.WriteLine("MP3 music loaded successfully!");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"MP3 load failed: {ex.Message}");
+            }
+        }
+        
+        if (!_musicLoaded)
+        {
+            Console.WriteLine("Warning: Could not load any music file. Game will run without music.");
         }
 
         if (_musicLoaded)
