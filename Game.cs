@@ -80,7 +80,7 @@ public class Game : IDisposable
     private void Initialize()
     {
         // Fullscreen mode
-        Raylib.SetConfigFlags(ConfigFlags.FullscreenMode | ConfigFlags.VsyncHint);
+        Raylib.SetConfigFlags(ConfigFlags.FullscreenMode);
         Raylib.InitWindow(0, 0, "Creeper");
 
         _screenWidth = Raylib.GetScreenWidth();
@@ -324,7 +324,7 @@ public class Game : IDisposable
                 break;
         }
 
-        EndDrawing();
+        Raylib.EndDrawing();
     }
 
     private void DrawIntroScreen()
