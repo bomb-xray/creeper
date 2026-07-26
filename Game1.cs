@@ -618,13 +618,9 @@ public class Game1 : Game
         string[] labels = { "PLAY", "OPTIONS", "EXIT" };
         int menuScale = _uiScale + 1;
         int spacing = menuScale * 16;
-        int hintScale = Math.Max(2, _uiScale - 1);
-        int menuStartY = _screenHeight - spacing * 3 - hintScale * 10;
-
-        // Soft dark strip behind the menu so the text stays readable on any image.
-        int stripTop = menuStartY - spacing / 2;
-        int stripHeight = _screenHeight - stripTop;
-        _spriteBatch.Draw(_pixel, new Rectangle(0, stripTop, _screenWidth, stripHeight), new Color(0, 0, 0, 120));
+        // The menu sits directly on the artwork; the drop shadow on each glyph
+        // is what keeps it readable, so no backdrop is drawn.
+        int menuStartY = _screenHeight - spacing * 3;
 
         for (int i = 0; i < labels.Length; i++)
         {
@@ -647,10 +643,6 @@ public class Game1 : Game
                 _font.DrawTextShadowed(_spriteBatch, "<", _screenWidth / 2 + halfWidth + arrowGap, y, menuScale, color, true);
             }
         }
-
-        _font.DrawTextShadowed(_spriteBatch, "ARROWS - MOVE    ENTER - SELECT    ESC - QUIT",
-            _screenWidth / 2, _screenHeight - hintScale * 8, hintScale,
-            new Color(150, 150, 150), true);
     }
 
     private void DrawOptionsScreen()
