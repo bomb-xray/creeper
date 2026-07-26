@@ -1,8 +1,7 @@
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Audio;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
-using Microsoft.Xna.Framework.Audio;
-using Microsoft.Xna.Framework.Media;
 using System;
 using System.IO;
 
@@ -25,75 +24,111 @@ public enum MenuOption
 
 public class Game1 : Game
 {
-    private GraphicsDeviceManager _graphics;
-    private SpriteBatch _spriteBatch;
+    private readonly GraphicsDeviceManager _graphics;
+    private SpriteBatch _spriteBatch = null!;
 
     // Textures
-    private Texture2D _introTexture;
-    private Texture2D _mainTexture;
+    private Texture2D? _introTexture;
+    private Texture2D? _mainTexture;
+    private Texture2D _pixel = null!;   // 1x1 white texture used for overlays/bars
 
     // Audio
-    private SoundEffect _clickSound;
-    private Song _bgMusic;
+    private SoundEffect? _clickSound;
+    private SoundEffect? _musicSound;
+    private SoundEffectInstance? _musicInstance;
 
     // State
     private GameState _state = GameState.IntroFadeIn;
     private MenuOption _selectedOption = MenuOption.Play;
 
-    // Fade
-    private float _introAlpha = 0f;
-    private float _mainAlpha = 0f;
-    private float _fadeSpeed = 1.2f;
-    private float _transitionTimer = 0f;
-    private float _transitionDuration = 1.5f;
+    // Fade values (0..1)
+    private float _introAlpha;
+    private float _mainAlpha;
+    private const float FadeSpeed = 0.8f;
+    private float _transitionTimer;
+    private const float TransitionDuration = 1.6f;
 
-    // Text blink
-    private float _blinkTimer = 0f;
+    // Blinking "press any key" text
+    private float _blinkTimer;
     private bool _blinkVisible = true;
 
-    // Menu animation
-    private float _menuAlpha = 0f;
-    private float[] _optionAlphas = new float[3] { 0f, 0f, 0f };
-    private float _optionStaggerDelay = 0.2f;
+    // Menu reveal animation
+    private float _menuAlpha;
+    private readonly float[] _optionAlphas = new float[3];
+    private const float OptionStaggerDelay = 0.18f;
+
+    // "Coming soon" toast shown when PLAY is chosen
+    private float _toastTimer;
+    private string _toastText = string.Empty;
 
     // Options screen
-    private bool _showingOptions = false;
-    private int _optionsSelected = 0;
+    private bool _showingOptions;
+    private int _optionsSelected;
+    private float _masterVolume = 0.7f;
 
-    // Pixel font size
-    private const int TitleFontSize = 50;
-    private const int MenuFontSize = 40;
-    private const int SubFontSize = 24;
+    // Custom pixel font
+    private PixelFont _font = null!;
 
-    // Font (using default)
-    private PixelFont _font;
-
-    // Previous keyboard state for key press detection
+    // Input
     private KeyboardState _prevKeyboardState;
+    private MouseState _prevMouseState;
 
-    // Screen
+    // Screen metrics
     private int _screenWidth;
     private int _screenHeight;
+
+    // Font scale (pixels per font pixel), derived from the screen height so that
+    // the UI keeps the same proportions on 768p and 1080p displays.
+    private int _uiScale = 3;
 
     public Game1()
     {
         _graphics = new GraphicsDeviceManager(this);
         Content.RootDirectory = "Content";
         IsMouseVisible = false;
+        IsFixedTimeStep = true;
     }
 
     protected override void Initialize()
     {
-        // Fullscreen
-        _graphics.IsFullScreen = true;
-        _graphics.PreferredBackBufferWidth = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode.Width;
-        _graphics.PreferredBackBufferHeight = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode.Height;
-        _graphics.ApplyChanges();
+        Window.AllowUserResizing = false;
+        Window.Title = "CREEPER";
 
-        _screenWidth = _graphics.PreferredBackBufferWidth;
-        _screenHeight = _graphics.PreferredBackBufferHeight;
+        var display = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode;
+
+        _graphics.PreferredBackBufferWidth = display.Width;
+        _graphics.PreferredBackBufferHeight = display.Height;
+        // Borderless fullscreen: much safer than a hardware mode switch on old
+        // GPUs/drivers, and alt-tab keeps working.
+        _graphics.HardwareModeSwitch = false;
+        _graphics.IsFullScreen = true;
+        _graphics.SynchronizeWithVerticalRetrace = true;
+
+        try
+        {
+            _graphics.ApplyChanges();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Fullscreen failed, falling back to a window: {ex.Message}");
+            _graphics.IsFullScreen = false;
+            _graphics.PreferredBackBufferWidth = 1280;
+            _graphics.PreferredBackBufferHeight = 720;
+            _graphics.ApplyChanges();
+        }
+
+        UpdateScreenMetrics();
 
         base.Initialize();
+    }
+
+    private void UpdateScreenMetrics()
+    {
+        _screenWidth = GraphicsDevice.PresentationParameters.BackBufferWidth;
+        _screenHeight = GraphicsDevice.PresentationParameters.BackBufferHeight;
+        // 768p -> 3, 1080p -> 4, 1440p -> 5 ...
+        _uiScale = Math.Max(2, (int)MathF.Round(_screenHeight / 260f));
+        Console.WriteLine($"Screen: {_screenWidth}x{_screenHeight} (ui scale {_uiScale})");
     }
 
     protected override void LoadContent()
@@ -101,161 +136,176 @@ public class Game1 : Game
         _spriteBatch = new SpriteBatch(GraphicsDevice);
         _font = new PixelFont(GraphicsDevice);
 
-        // Load assets from assets folder
+        _pixel = new Texture2D(GraphicsDevice, 1, 1);
+        _pixel.SetData(new[] { Color.White });
+
         string assetDir = FindAssetDirectory();
         LoadAssets(assetDir);
     }
 
     private string FindAssetDirectory()
     {
-        string[] paths = {
+        string[] candidates =
+        {
             "assets",
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets"),
             "../../../assets",
             "../../assets",
-            "../assets",
-            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets")
+            "../assets"
         };
 
-        foreach (string path in paths)
+        foreach (string path in candidates)
         {
             if (Directory.Exists(path))
             {
-                Console.WriteLine($"Found assets directory: {path}");
+                Console.WriteLine($"Assets directory: {Path.GetFullPath(path)}");
                 return path;
             }
         }
 
-        Console.WriteLine("Warning: assets directory not found!");
+        Console.WriteLine("WARNING: assets directory not found!");
         return "assets";
     }
 
     private void LoadAssets(string assetDir)
     {
-        // Load textures with auto-conversion
-        _introTexture = LoadTextureWithConversion(assetDir, "image") ?? 
-                       LoadTextureWithConversion(assetDir, "negro") ??
-                       CreateDummyTexture();
+        _introTexture = LoadTexture(assetDir, "image") ?? LoadTexture(assetDir, "negro");
+        _mainTexture = LoadTexture(assetDir, "negro") ?? _introTexture;
 
-        _mainTexture = LoadTextureWithConversion(assetDir, "negro") ?? CreateDummyTexture();
+        _clickSound = LoadSound(assetDir, "click");
 
-        // Load click sound
-        _clickSound = LoadSoundWithConversion(assetDir, "click");
-
-        // Load music
-        string musicPath = AudioConverter.EnsurePlayableAudio(assetDir, "untrust");
-        if (!string.IsNullOrEmpty(musicPath) && File.Exists(musicPath))
+        _musicSound = LoadSound(assetDir, "untrust");
+        if (_musicSound != null)
         {
             try
             {
-                using (var stream = File.OpenRead(musicPath))
-                {
-                    _bgMusic = Song.FromStream("untrust", stream);
-                    MediaPlayer.Volume = 0.7f;
-                    MediaPlayer.IsRepeating = true;
-                    Console.WriteLine($"Music loaded: {musicPath}");
-                }
+                _musicInstance = _musicSound.CreateInstance();
+                _musicInstance.IsLooped = true;
+                _musicInstance.Volume = _masterVolume;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Failed to load music: {ex.Message}");
+                Console.WriteLine($"Could not create the music instance: {ex.Message}");
+                _musicInstance = null;
             }
         }
     }
 
-    private Texture2D LoadTextureWithConversion(string dir, string baseName)
+    /// <summary>Loads an image, converting it to PNG first when the format is risky.</summary>
+    private Texture2D? LoadTexture(string dir, string baseName)
     {
-        // Try to convert problematic formats first
-        string imagePath = ImageConverter.EnsureLoadableImage(dir, baseName);
-        
-        if (string.IsNullOrEmpty(imagePath))
-        {
-            // Try native formats
-            string[] extensions = { ".png", ".bmp", ".tga", ".jpg", ".jpeg" };
-            foreach (string ext in extensions)
-            {
-                string path = Path.Combine(dir, baseName + ext);
-                if (File.Exists(path))
-                {
-                    imagePath = path;
-                    break;
-                }
-            }
-        }
-
+        string? imagePath = ImageConverter.EnsureLoadableImage(dir, baseName);
         if (string.IsNullOrEmpty(imagePath) || !File.Exists(imagePath))
         {
-            Console.WriteLine($"No texture found for: {baseName}");
+            Console.WriteLine($"No image found for '{baseName}'");
             return null;
         }
 
         try
         {
-            Console.WriteLine($"Loading texture: {imagePath}");
-            using (var stream = File.OpenRead(imagePath))
-            {
-                var texture = Texture2D.FromStream(GraphicsDevice, stream);
-                Console.WriteLine($"  -> SUCCESS: {texture.Width}x{texture.Height}");
-                return texture;
-            }
+            using var stream = File.OpenRead(imagePath);
+            var texture = Texture2D.FromStream(GraphicsDevice, stream);
+            Console.WriteLine($"Loaded image {imagePath} ({texture.Width}x{texture.Height})");
+            return texture;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"  -> FAILED: {ex.Message}");
+            Console.WriteLine($"Failed to load image {imagePath}: {ex.Message}");
+
+            // Last resort: force a re-encode through ImageSharp and try again.
+            string repaired = Path.Combine(dir, baseName + "_converted.png");
+            try
+            {
+                if (ImageConverter.ConvertToPng(imagePath, repaired))
+                {
+                    using var stream = File.OpenRead(repaired);
+                    var texture = Texture2D.FromStream(GraphicsDevice, stream);
+                    Console.WriteLine($"Loaded repaired image {repaired} ({texture.Width}x{texture.Height})");
+                    return texture;
+                }
+            }
+            catch (Exception inner)
+            {
+                Console.WriteLine($"Repair attempt failed: {inner.Message}");
+            }
+
             return null;
         }
     }
 
-    private SoundEffect LoadSoundWithConversion(string dir, string baseName)
+    /// <summary>Loads audio, converting MP3/M4A/OGG/... to WAV because DesktopGL only decodes WAV.</summary>
+    private SoundEffect? LoadSound(string dir, string baseName)
     {
-        string soundPath = AudioConverter.EnsurePlayableAudio(dir, baseName);
-        
+        string? soundPath = AudioConverter.EnsurePlayableAudio(dir, baseName);
         if (string.IsNullOrEmpty(soundPath) || !File.Exists(soundPath))
         {
-            Console.WriteLine($"No sound found for: {baseName}");
+            Console.WriteLine($"No audio found for '{baseName}'");
             return null;
         }
 
         try
         {
-            Console.WriteLine($"Loading sound: {soundPath}");
-            using (var stream = File.OpenRead(soundPath))
-            {
-                var sound = SoundEffect.FromStream(stream);
-                Console.WriteLine($"  -> SUCCESS");
-                return sound;
-            }
+            using var stream = File.OpenRead(soundPath);
+            var sound = SoundEffect.FromStream(stream);
+            Console.WriteLine($"Loaded audio {soundPath} ({sound.Duration.TotalSeconds:0.0}s)");
+            return sound;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"  -> FAILED: {ex.Message}");
+            Console.WriteLine($"Failed to load audio {soundPath}: {ex.Message}");
             return null;
         }
     }
 
-    private Texture2D CreateDummyTexture()
+    private void PlayClick()
     {
-        var texture = new Texture2D(GraphicsDevice, 1, 1);
-        texture.SetData(new[] { Color.DarkGray });
-        return texture;
+        try
+        {
+            _clickSound?.Play(_masterVolume, 0f, 0f);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Click sound failed: {ex.Message}");
+        }
+    }
+
+    private void PlayMusic()
+    {
+        if (_musicInstance == null) return;
+        try
+        {
+            if (_musicInstance.State != SoundState.Playing)
+            {
+                _musicInstance.Volume = _masterVolume;
+                _musicInstance.Play();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Music playback failed: {ex.Message}");
+            _musicInstance = null;
+        }
     }
 
     protected override void Update(GameTime gameTime)
     {
         float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
-        var kbState = Keyboard.GetState();
+        var kb = Keyboard.GetState();
+        var mouse = Mouse.GetState();
 
-        // ESC to quit
-        if (WasKeyPressed(kbState, Keys.Escape))
+        if (WasKeyPressed(kb, Keys.Escape))
         {
-            if (_showingOptions)
-            {
-                _showingOptions = false;
-            }
-            else
-            {
-                Exit();
-            }
+            // Inside the options panel ESC goes back, everywhere else it quits.
+            if (_showingOptions) _showingOptions = false;
+            else Exit();
         }
+
+        if (WasKeyPressed(kb, Keys.F11))
+        {
+            ToggleFullscreen();
+        }
+
+        if (_toastTimer > 0f) _toastTimer -= dt;
 
         switch (_state)
         {
@@ -263,23 +313,42 @@ public class Game1 : Game
                 UpdateIntroFadeIn(dt);
                 break;
             case GameState.IntroWaiting:
-                UpdateIntroWaiting(dt);
+                UpdateIntroWaiting(dt, kb, mouse);
                 break;
             case GameState.Transition:
                 UpdateTransition(dt);
                 break;
             case GameState.MainMenu:
-                UpdateMainMenu(dt);
+                UpdateMainMenu(dt, kb);
                 break;
         }
 
-        _prevKeyboardState = kbState;
+        _prevKeyboardState = kb;
+        _prevMouseState = mouse;
         base.Update(gameTime);
+    }
+
+    private void ToggleFullscreen()
+    {
+        _graphics.IsFullScreen = !_graphics.IsFullScreen;
+        if (_graphics.IsFullScreen)
+        {
+            var display = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode;
+            _graphics.PreferredBackBufferWidth = display.Width;
+            _graphics.PreferredBackBufferHeight = display.Height;
+        }
+        else
+        {
+            _graphics.PreferredBackBufferWidth = 1280;
+            _graphics.PreferredBackBufferHeight = 720;
+        }
+        _graphics.ApplyChanges();
+        UpdateScreenMetrics();
     }
 
     private void UpdateIntroFadeIn(float dt)
     {
-        _introAlpha += _fadeSpeed * dt;
+        _introAlpha += FadeSpeed * dt;
         if (_introAlpha >= 1f)
         {
             _introAlpha = 1f;
@@ -287,22 +356,22 @@ public class Game1 : Game
         }
     }
 
-    private void UpdateIntroWaiting(float dt)
+    private void UpdateIntroWaiting(float dt, KeyboardState kb, MouseState mouse)
     {
         _blinkTimer += dt;
-        if (_blinkTimer >= 0.6f)
+        if (_blinkTimer >= 0.55f)
         {
             _blinkTimer = 0f;
             _blinkVisible = !_blinkVisible;
         }
 
-        var kbState = Keyboard.GetState();
-        var mouseState = Mouse.GetState();
+        bool anyKey = kb.GetPressedKeys().Length > 0 && _prevKeyboardState.GetPressedKeys().Length == 0;
+        bool anyClick = mouse.LeftButton == ButtonState.Pressed && _prevMouseState.LeftButton == ButtonState.Released;
 
-        if (kbState.GetPressedKeys().Length > 0 || mouseState.LeftButton == ButtonState.Pressed)
+        if (anyKey || anyClick)
         {
+            PlayClick();
             _state = GameState.Transition;
-            _clickSound?.Play();
             _transitionTimer = 0f;
         }
     }
@@ -311,75 +380,67 @@ public class Game1 : Game
     {
         _transitionTimer += dt;
 
-        _introAlpha = MathF.Max(0f, 1f - (_transitionTimer / _transitionDuration));
+        // First image fades out over the first 60% of the transition.
+        float outProgress = MathF.Min(1f, _transitionTimer / (TransitionDuration * 0.6f));
+        _introAlpha = 1f - outProgress;
 
-        float mainFadeStart = _transitionDuration * 0.3f;
+        // Second image starts fading in slightly before the first one is gone.
+        const float mainFadeStart = TransitionDuration * 0.35f;
         if (_transitionTimer > mainFadeStart)
         {
-            float mainProgress = (_transitionTimer - mainFadeStart) / (_transitionDuration - mainFadeStart);
-            _mainAlpha = MathF.Min(1f, mainProgress);
+            _mainAlpha = MathF.Min(1f, (_transitionTimer - mainFadeStart) / (TransitionDuration - mainFadeStart));
+            PlayMusic();
         }
 
-        if (_transitionTimer > mainFadeStart && _bgMusic != null && MediaPlayer.State != MediaState.Playing)
-        {
-            MediaPlayer.Play(_bgMusic);
-        }
-
-        if (_transitionTimer >= _transitionDuration)
+        if (_transitionTimer >= TransitionDuration)
         {
             _introAlpha = 0f;
             _mainAlpha = 1f;
             _state = GameState.MainMenu;
             _menuAlpha = 0f;
-            _optionAlphas = new float[3] { 0f, 0f, 0f };
+            Array.Clear(_optionAlphas, 0, _optionAlphas.Length);
         }
     }
 
-    private void UpdateMainMenu(float dt)
+    private void UpdateMainMenu(float dt, KeyboardState kb)
     {
-        if (_bgMusic != null && MediaPlayer.State != MediaState.Playing)
-        {
-            MediaPlayer.Play(_bgMusic);
-        }
+        PlayMusic();
 
         if (_showingOptions)
         {
-            UpdateOptionsScreen(dt);
+            UpdateOptionsScreen(kb);
             return;
         }
 
-        _menuAlpha = MathF.Min(1f, _menuAlpha + dt * 2f);
-        for (int i = 0; i < 3; i++)
+        _menuAlpha = MathF.Min(2f, _menuAlpha + dt * 1.6f);
+        for (int i = 0; i < _optionAlphas.Length; i++)
         {
-            float delay = i * _optionStaggerDelay;
+            float delay = i * OptionStaggerDelay;
             if (_menuAlpha > delay)
             {
-                _optionAlphas[i] = MathF.Min(1f, (_menuAlpha - delay) * 2f);
+                _optionAlphas[i] = MathF.Min(1f, (_menuAlpha - delay) * 2.5f);
             }
         }
 
-        var kbState = Keyboard.GetState();
-
-        if (WasKeyPressed(kbState, Keys.Up) || WasKeyPressed(kbState, Keys.W))
+        if (WasKeyPressed(kb, Keys.Up) || WasKeyPressed(kb, Keys.W))
         {
-            int prev = (int)_selectedOption;
-            _selectedOption = (MenuOption)((prev - 1 + 3) % 3);
-            _clickSound?.Play();
+            _selectedOption = (MenuOption)(((int)_selectedOption + 2) % 3);
+            PlayClick();
         }
 
-        if (WasKeyPressed(kbState, Keys.Down) || WasKeyPressed(kbState, Keys.S))
+        if (WasKeyPressed(kb, Keys.Down) || WasKeyPressed(kb, Keys.S))
         {
-            int next = (int)_selectedOption;
-            _selectedOption = (MenuOption)((next + 1) % 3);
-            _clickSound?.Play();
+            _selectedOption = (MenuOption)(((int)_selectedOption + 1) % 3);
+            PlayClick();
         }
 
-        if (WasKeyPressed(kbState, Keys.Enter) || WasKeyPressed(kbState, Keys.Space))
+        if (WasKeyPressed(kb, Keys.Enter) || WasKeyPressed(kb, Keys.Space) || WasKeyPressed(kb, Keys.Z))
         {
-            _clickSound?.Play();
+            PlayClick();
             switch (_selectedOption)
             {
                 case MenuOption.Play:
+                    ShowToast("COMING SOON");
                     break;
                 case MenuOption.Options:
                     _showingOptions = true;
@@ -392,39 +453,72 @@ public class Game1 : Game
         }
     }
 
+    private void ShowToast(string text)
+    {
+        _toastText = text;
+        _toastTimer = 1.8f;
+    }
+
+    private void UpdateOptionsScreen(KeyboardState kb)
+    {
+        const int optionCount = 3; // volume, fullscreen, back
+
+        if (WasKeyPressed(kb, Keys.Up) || WasKeyPressed(kb, Keys.W))
+        {
+            _optionsSelected = (_optionsSelected - 1 + optionCount) % optionCount;
+            PlayClick();
+        }
+
+        if (WasKeyPressed(kb, Keys.Down) || WasKeyPressed(kb, Keys.S))
+        {
+            _optionsSelected = (_optionsSelected + 1) % optionCount;
+            PlayClick();
+        }
+
+        bool left = WasKeyPressed(kb, Keys.Left) || WasKeyPressed(kb, Keys.A);
+        bool right = WasKeyPressed(kb, Keys.Right) || WasKeyPressed(kb, Keys.D);
+        bool confirm = WasKeyPressed(kb, Keys.Enter) || WasKeyPressed(kb, Keys.Space) || WasKeyPressed(kb, Keys.Z);
+
+        switch (_optionsSelected)
+        {
+            case 0: // Master volume
+                if (left || right)
+                {
+                    _masterVolume = MathHelper.Clamp(_masterVolume + (right ? 0.1f : -0.1f), 0f, 1f);
+                    if (_musicInstance != null) _musicInstance.Volume = _masterVolume;
+                    PlayClick();
+                }
+                break;
+
+            case 1: // Fullscreen toggle
+                if (left || right || confirm)
+                {
+                    PlayClick();
+                    ToggleFullscreen();
+                }
+                break;
+
+            case 2: // Back
+                if (confirm)
+                {
+                    PlayClick();
+                    _showingOptions = false;
+                }
+                break;
+        }
+    }
+
     private bool WasKeyPressed(KeyboardState current, Keys key)
-    {
-        return current.IsKeyDown(key) && _prevKeyboardState.IsKeyUp(key);
-    }
-
-    private void UpdateOptionsScreen(float dt)
-    {
-        var kbState = Keyboard.GetState();
-
-        if (WasKeyPressed(kbState, Keys.Up) || WasKeyPressed(kbState, Keys.W))
-        {
-            _optionsSelected = (_optionsSelected - 1 + 2) % 2;
-            _clickSound?.Play();
-        }
-
-        if (WasKeyPressed(kbState, Keys.Down) || WasKeyPressed(kbState, Keys.S))
-        {
-            _optionsSelected = (_optionsSelected + 1) % 2;
-            _clickSound?.Play();
-        }
-
-        if (WasKeyPressed(kbState, Keys.Enter) || WasKeyPressed(kbState, Keys.Space))
-        {
-            _clickSound?.Play();
-            _showingOptions = false;
-        }
-    }
+        => current.IsKeyDown(key) && _prevKeyboardState.IsKeyUp(key);
 
     protected override void Draw(GameTime gameTime)
     {
         GraphicsDevice.Clear(Color.Black);
 
-        _spriteBatch.Begin();
+        // NonPremultiplied: Texture2D.FromStream does not premultiply alpha, and the
+        // translucent overlays below rely on straight alpha too.
+        // PointClamp keeps the pixel font crisp instead of blurry.
+        _spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied, SamplerState.PointClamp);
 
         switch (_state)
         {
@@ -440,65 +534,71 @@ public class Game1 : Game
                 break;
         }
 
+        DrawToast();
+
         _spriteBatch.End();
 
         base.Draw(gameTime);
     }
 
+    /// <summary>Draws a texture stretched over the whole screen.</summary>
+    private void DrawStretched(Texture2D texture, float alpha)
+    {
+        if (texture == null || alpha <= 0f) return;
+        _spriteBatch.Draw(texture, new Rectangle(0, 0, _screenWidth, _screenHeight), Tint(alpha));
+    }
+
+    /// <summary>White tint with the given opacity (straight alpha, RGB untouched).</summary>
+    private static Color Tint(float alpha) => WithAlpha(Color.White, alpha);
+
+    /// <summary>Copies a color and scales only its alpha channel.</summary>
+    private static Color WithAlpha(Color color, float alpha)
+    {
+        color.A = (byte)MathHelper.Clamp(alpha * 255f, 0f, 255f);
+        return color;
+    }
+
     private void DrawIntroScreen()
     {
-        if (_introTexture != null)
+        if (_introTexture == null) return;
+
+        // Leave room at the bottom for the prompt.
+        float reserved = _screenHeight * 0.12f;
+        float scale = MathF.Min((float)_screenWidth / _introTexture.Width,
+                                (_screenHeight - reserved) / _introTexture.Height);
+        int width = (int)(_introTexture.Width * scale);
+        int height = (int)(_introTexture.Height * scale);
+        int x = (_screenWidth - width) / 2;
+        int y = (int)((_screenHeight - reserved - height) / 2f);
+
+        _spriteBatch.Draw(_introTexture, new Rectangle(x, y, width, height), Tint(_introAlpha));
+
+        if (_state == GameState.IntroWaiting && _blinkVisible)
         {
-            float scaleX = (float)_screenWidth / _introTexture.Width;
-            float scaleY = (float)_screenHeight / _introTexture.Height;
-            float scale = MathF.Min(scaleX, scaleY);
-
-            float scaledWidth = _introTexture.Width * scale;
-            float scaledHeight = _introTexture.Height * scale;
-            float posX = (_screenWidth - scaledWidth) / 2f;
-            float posY = (_screenHeight - scaledHeight) / 2f - 30;
-
-            Color tintColor = new Color(255, 255, 255, (int)(_introAlpha * 255));
-            _spriteBatch.Draw(_introTexture, new Rectangle((int)posX, (int)posY, (int)scaledWidth, (int)scaledHeight), tintColor);
-
-            if (_state == GameState.IntroWaiting && _blinkVisible)
-            {
-                string text = "PRESS ANY KEY TO CONTINUE";
-                DrawText(text, _screenWidth / 2, (int)(posY + scaledHeight + 20), SubFontSize, new Color(255, 255, 255, (int)(_introAlpha * 255)), true);
-            }
+            int promptY = Math.Min(y + height + _uiScale * 10, _screenHeight - _uiScale * 10);
+            _font.DrawTextShadowed(_spriteBatch, "PRESS ANY KEY TO CONTINUE",
+                _screenWidth / 2, promptY, _uiScale,
+                WithAlpha(new Color(230, 230, 230), _introAlpha), true);
         }
     }
 
     private void DrawTransitionScreen()
     {
-        if (_introAlpha > 0f && _introTexture != null)
+        if (_introTexture != null && _introAlpha > 0f)
         {
-            float scaleX = (float)_screenWidth / _introTexture.Width;
-            float scaleY = (float)_screenHeight / _introTexture.Height;
-            float scale = MathF.Min(scaleX, scaleY);
-
-            float scaledWidth = _introTexture.Width * scale;
-            float scaledHeight = _introTexture.Height * scale;
-            float posX = (_screenWidth - scaledWidth) / 2f;
-            float posY = (_screenHeight - scaledHeight) / 2f - 30;
-
-            Color tintColor = new Color(255, 255, 255, (int)(_introAlpha * 255));
-            _spriteBatch.Draw(_introTexture, new Rectangle((int)posX, (int)posY, (int)scaledWidth, (int)scaledHeight), tintColor);
+            float reserved = _screenHeight * 0.12f;
+            float scale = MathF.Min((float)_screenWidth / _introTexture.Width,
+                                    (_screenHeight - reserved) / _introTexture.Height);
+            int width = (int)(_introTexture.Width * scale);
+            int height = (int)(_introTexture.Height * scale);
+            _spriteBatch.Draw(_introTexture,
+                new Rectangle((_screenWidth - width) / 2, (int)((_screenHeight - reserved - height) / 2f), width, height),
+                Tint(_introAlpha));
         }
 
-        if (_mainAlpha > 0f && _mainTexture != null)
+        if (_mainTexture != null && _mainAlpha > 0f)
         {
-            float scaleX = (float)_screenWidth / _mainTexture.Width;
-            float scaleY = (float)_screenHeight / _mainTexture.Height;
-            float scale = MathF.Min(scaleX, scaleY);
-
-            float scaledWidth = _mainTexture.Width * scale;
-            float scaledHeight = _mainTexture.Height * scale;
-            float posX = (_screenWidth - scaledWidth) / 2f;
-            float posY = (_screenHeight - scaledHeight) / 2f - 40;
-
-            Color tintColor = new Color(255, 255, 255, (int)(_mainAlpha * 255));
-            _spriteBatch.Draw(_mainTexture, new Rectangle((int)posX, (int)posY, (int)scaledWidth, (int)scaledHeight), tintColor);
+            DrawStretched(_mainTexture, _mainAlpha);
         }
     }
 
@@ -506,7 +606,7 @@ public class Game1 : Game
     {
         if (_mainTexture != null)
         {
-            _spriteBatch.Draw(_mainTexture, new Rectangle(0, 0, _screenWidth, _screenHeight), new Color(255, 255, 255, (int)(_mainAlpha * 255)));
+            DrawStretched(_mainTexture, _mainAlpha);
         }
 
         if (_showingOptions)
@@ -515,74 +615,111 @@ public class Game1 : Game
             return;
         }
 
-        string[] options = { "PLAY", "OPTIONS", "EXIT" };
-        float menuStartY = _screenHeight - 220;
-        float spacing = 55;
+        string[] labels = { "PLAY", "OPTIONS", "EXIT" };
+        int menuScale = _uiScale + 1;
+        int spacing = menuScale * 16;
+        int hintScale = Math.Max(2, _uiScale - 1);
+        int menuStartY = _screenHeight - spacing * 3 - hintScale * 10;
 
-        for (int i = 0; i < options.Length; i++)
+        // Soft dark strip behind the menu so the text stays readable on any image.
+        int stripTop = menuStartY - spacing / 2;
+        int stripHeight = _screenHeight - stripTop;
+        _spriteBatch.Draw(_pixel, new Rectangle(0, stripTop, _screenWidth, stripHeight), new Color(0, 0, 0, 120));
+
+        for (int i = 0; i < labels.Length; i++)
         {
             float alpha = _optionAlphas[i];
             if (alpha <= 0f) continue;
 
-            bool selected = (i == (int)_selectedOption);
-            Color textColor = selected ? new Color(220, 40, 40, (int)(alpha * 255)) : new Color(200, 200, 200, (int)(alpha * 200));
+            bool selected = i == (int)_selectedOption;
+            Color color = selected
+                ? WithAlpha(new Color(220, 40, 40), alpha)
+                : WithAlpha(new Color(205, 205, 205), alpha * 0.85f);
 
-            DrawText(options[i], _screenWidth / 2, (int)(menuStartY + (i * spacing)), MenuFontSize, textColor, true);
+            int y = menuStartY + i * spacing;
+            _font.DrawTextShadowed(_spriteBatch, labels[i], _screenWidth / 2, y, menuScale, color, true);
 
             if (selected)
             {
-                DrawText(">", _screenWidth / 2 - 150, (int)(menuStartY + (i * spacing)), MenuFontSize, textColor, false);
-                DrawText("<", _screenWidth / 2 + 150, (int)(menuStartY + (i * spacing)), MenuFontSize, textColor, false);
+                int halfWidth = _font.MeasureText(labels[i], menuScale) / 2;
+                int arrowGap = menuScale * 7;
+                _font.DrawTextShadowed(_spriteBatch, ">", _screenWidth / 2 - halfWidth - arrowGap, y, menuScale, color, true);
+                _font.DrawTextShadowed(_spriteBatch, "<", _screenWidth / 2 + halfWidth + arrowGap, y, menuScale, color, true);
             }
         }
+
+        _font.DrawTextShadowed(_spriteBatch, "ARROWS - MOVE    ENTER - SELECT    ESC - QUIT",
+            _screenWidth / 2, _screenHeight - hintScale * 8, hintScale,
+            new Color(150, 150, 150), true);
     }
 
     private void DrawOptionsScreen()
     {
-        _spriteBatch.Draw(CreateDummyTexture(), new Rectangle(0, 0, _screenWidth, _screenHeight), new Color(0, 0, 0, 200));
+        _spriteBatch.Draw(_pixel, new Rectangle(0, 0, _screenWidth, _screenHeight), new Color(0, 0, 0, 215));
 
-        DrawText("OPTIONS", _screenWidth / 2, _screenHeight / 2 - 120, TitleFontSize, Color.White, true);
+        int titleScale = _uiScale + 2;
+        int itemScale = _uiScale + 1;
+        int hintScale = Math.Max(2, _uiScale - 1);
+        _font.DrawTextShadowed(_spriteBatch, "OPTIONS", _screenWidth / 2, (int)(_screenHeight * 0.22f), titleScale, Color.White, true);
 
-        string[] opts = { "BACK", "CREDITS" };
-        float startY = _screenHeight / 2f - 20;
-        float spacing = 60;
-
-        for (int i = 0; i < opts.Length; i++)
+        string[] labels =
         {
-            bool selected = (i == _optionsSelected);
-            Color col = selected ? new Color(220, 40, 40, 255) : new Color(200, 200, 200, 200);
+            $"VOLUME  {BuildVolumeBar()}",
+            $"FULLSCREEN  {(_graphics.IsFullScreen ? "ON" : "OFF")}",
+            "BACK"
+        };
 
-            DrawText(opts[i], _screenWidth / 2, (int)(startY + (i * spacing)), MenuFontSize, col, true);
+        int startY = (int)(_screenHeight * 0.42f);
+        int spacing = itemScale * 16;
+
+        for (int i = 0; i < labels.Length; i++)
+        {
+            bool selected = i == _optionsSelected;
+            Color color = selected ? new Color(220, 40, 40) : new Color(200, 200, 200);
+            int y = startY + i * spacing;
+
+            _font.DrawTextShadowed(_spriteBatch, labels[i], _screenWidth / 2, y, itemScale, color, true);
 
             if (selected)
             {
-                DrawText(">", _screenWidth / 2 - 100, (int)(startY + (i * spacing)), MenuFontSize, col, false);
-                DrawText("<", _screenWidth / 2 + 100, (int)(startY + (i * spacing)), MenuFontSize, col, false);
+                int halfWidth = _font.MeasureText(labels[i], itemScale) / 2;
+                int arrowGap = itemScale * 7;
+                _font.DrawTextShadowed(_spriteBatch, ">", _screenWidth / 2 - halfWidth - arrowGap, y, itemScale, color, true);
+                _font.DrawTextShadowed(_spriteBatch, "<", _screenWidth / 2 + halfWidth + arrowGap, y, itemScale, color, true);
             }
         }
 
-        DrawText("PRESS ESC TO GO BACK", _screenWidth / 2, _screenHeight - 60, 18, new Color(120, 120, 120, 255), true);
+        _font.DrawTextShadowed(_spriteBatch, "LEFT / RIGHT - CHANGE    ESC - BACK",
+            _screenWidth / 2, _screenHeight - hintScale * 12, hintScale,
+            new Color(150, 150, 150), true);
     }
 
-    private void DrawText(string text, int x, int y, int fontSize, Color color, bool center)
+    private string BuildVolumeBar()
     {
-        if (_font == null) return;
-        // fontSize is the pixel scale factor (e.g., 4 means each font pixel = 4 screen pixels)
-        int pixelSize = Math.Max(1, fontSize / 8);
-        _font.DrawText(_spriteBatch, text, x, y, pixelSize, color, center);
+        int filled = (int)MathF.Round(_masterVolume * 10f);
+        return "[" + new string('#', filled) + new string('-', 10 - filled) + "]";
+    }
+
+    private void DrawToast()
+    {
+        if (_toastTimer <= 0f) return;
+
+        float alpha = MathF.Min(1f, _toastTimer / 0.5f);
+        int y = (int)(_screenHeight * 0.62f);
+        _font.DrawTextShadowed(_spriteBatch, _toastText, _screenWidth / 2, y, _uiScale + 1,
+            WithAlpha(new Color(255, 230, 120), alpha), true);
     }
 
     protected override void UnloadContent()
     {
-        _introTexture?.Dispose();
-        _mainTexture?.Dispose();
+        _musicInstance?.Stop();
+        _musicInstance?.Dispose();
+        _musicSound?.Dispose();
         _clickSound?.Dispose();
+        _introTexture?.Dispose();
+        if (!ReferenceEquals(_mainTexture, _introTexture)) _mainTexture?.Dispose();
+        _pixel?.Dispose();
         _font?.Dispose();
-        
-        if (_bgMusic != null)
-        {
-            MediaPlayer.Stop();
-        }
 
         base.UnloadContent();
     }

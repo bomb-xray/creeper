@@ -36,3 +36,6 @@ msbuildlog*.binlog
 # OS
 .DS_Store
 Thumbs.db
+
+# Auto-generated asset conversions
+assets/*_converted.*

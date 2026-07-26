@@ -2,90 +2,115 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using System;
 using System.Collections.Generic;
-using System.IO;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
 
 namespace CreeperGame;
 
 /// <summary>
-/// A simple pixel font renderer that generates a bitmap font at runtime.
-/// Uses a basic 8x8 pixel font for ASCII characters.
+/// A tiny bitmap font that is generated at runtime, with no external font files
+/// and no third-party imaging dependencies (avoids Color/Rectangle name clashes).
+/// Glyphs are 6x7 pixels stored inside 8x8 cells of a 128x64 atlas texture.
 /// </summary>
 public class PixelFont : IDisposable
 {
-    private Texture2D _fontTexture;
-    private int _charWidth = 8;
-    private int _charHeight = 8;
-    private int _charsPerRow = 16;
-    private Dictionary<char, Rectangle> _charMap = new Dictionary<char, Rectangle>();
+    private const int CellSize = 8;      // Size of one cell in the atlas
+    private const int GlyphWidth = 6;    // Visible width of a glyph
+    private const int GlyphHeight = 7;   // Visible height of a glyph
+    private const int Advance = 7;       // Horizontal step between glyphs (glyph + 1px gap)
+    private const int Columns = 16;      // Cells per atlas row
+    private const int Rows = 8;          // Atlas rows (ASCII 0-127)
+
+    private readonly Texture2D _fontTexture;
+    private readonly Dictionary<char, Rectangle> _charMap = new Dictionary<char, Rectangle>();
 
     public PixelFont(GraphicsDevice device)
     {
-        GenerateFontTexture(device);
-    }
+        int texWidth = Columns * CellSize;
+        int texHeight = Rows * CellSize;
 
-    private void GenerateFontTexture(GraphicsDevice device)
-    {
-        // Create a basic pixel font using ImageSharp
-        // 16 chars per row, 8 rows = 128 characters (ASCII 0-127)
-        int texWidth = _charsPerRow * _charWidth;
-        int texHeight = 8 * _charHeight;
+        // Transparent by default (Color default value is 0,0,0,0)
+        var pixels = new Color[texWidth * texHeight];
 
-        using (var image = new Image<Rgba32>(texWidth, texHeight))
+        for (int code = 32; code < 127; code++)
         {
-            // Fill with transparent
-            image.Mutate(ctx => ctx.BackgroundColor(new Rgba32(0, 0, 0, 0)));
+            char c = (char)code;
+            string[] pattern = GetCharPattern(c);
+            if (pattern == null) continue;
 
-            // Draw basic pixel characters
-            for (int i = 32; i < 127; i++)
+            int cellX = (code % Columns) * CellSize;
+            int cellY = (code / Columns) * CellSize;
+
+            for (int y = 0; y < pattern.Length && y < GlyphHeight; y++)
             {
-                char c = (char)i;
-                int col = i % _charsPerRow;
-                int row = i / _charsPerRow;
-                int x = col * _charWidth;
-                int y = row * _charHeight;
-
-                DrawChar(image, c, x, y);
-                _charMap[c] = new Rectangle(x, y, _charWidth, _charHeight);
-            }
-
-            // Convert to MonoGame texture
-            using (var ms = new MemoryStream())
-            {
-                image.SaveAsPng(ms);
-                ms.Seek(0, SeekOrigin.Begin);
-                _fontTexture = Texture2D.FromStream(device, ms);
-            }
-        }
-    }
-
-    private void DrawChar(Image<Rgba32> image, char c, int offsetX, int offsetY)
-    {
-        var white = new Rgba32(255, 255, 255, 255);
-        
-        // Simple pixel font patterns (8x8 grid)
-        // Each pattern is an array of strings, each string is a row
-        string[] pattern = GetCharPattern(c);
-        
-        if (pattern == null) return;
-
-        for (int y = 0; y < pattern.Length && y < _charHeight; y++)
-        {
-            for (int x = 0; x < pattern[y].Length && x < _charWidth; x++)
-            {
-                if (pattern[y][x] == '#')
+                string row = pattern[y];
+                for (int x = 0; x < row.Length && x < GlyphWidth; x++)
                 {
-                    image[offsetX + x, offsetY + y] = white;
+                    if (row[x] == '#')
+                    {
+                        pixels[(cellY + y) * texWidth + (cellX + x)] = Color.White;
+                    }
                 }
             }
+
+            _charMap[c] = new Rectangle(cellX, cellY, GlyphWidth, GlyphHeight);
         }
+
+        _fontTexture = new Texture2D(device, texWidth, texHeight);
+        _fontTexture.SetData(pixels);
+    }
+
+    /// <summary>Width in screen pixels that the given text will occupy.</summary>
+    public int MeasureText(string text, int pixelSize)
+    {
+        if (string.IsNullOrEmpty(text)) return 0;
+        return (text.Length * Advance - 1) * pixelSize;
+    }
+
+    /// <summary>Height in screen pixels of a single line of text.</summary>
+    public int LineHeight(int pixelSize) => GlyphHeight * pixelSize;
+
+    /// <summary>
+    /// Draws text. When <paramref name="centered"/> is true the given position is
+    /// treated as the center of the text block instead of its top-left corner.
+    /// </summary>
+    public void DrawText(SpriteBatch spriteBatch, string text, int x, int y, int pixelSize, Color color, bool centered = false)
+    {
+        if (_fontTexture == null || string.IsNullOrEmpty(text)) return;
+        if (pixelSize < 1) pixelSize = 1;
+
+        text = text.ToUpperInvariant();
+
+        int startX = centered ? x - MeasureText(text, pixelSize) / 2 : x;
+        int startY = centered ? y - LineHeight(pixelSize) / 2 : y;
+
+        for (int i = 0; i < text.Length; i++)
+        {
+            char c = text[i];
+            if (c == ' ') continue;
+            if (!_charMap.TryGetValue(c, out Rectangle source)) continue;
+
+            var dest = new Rectangle(
+                startX + i * Advance * pixelSize,
+                startY,
+                GlyphWidth * pixelSize,
+                GlyphHeight * pixelSize);
+
+            spriteBatch.Draw(_fontTexture, dest, source, color);
+        }
+    }
+
+    /// <summary>Draws text with a hard pixel shadow so it stays readable over any image.</summary>
+    public void DrawTextShadowed(SpriteBatch spriteBatch, string text, int x, int y, int pixelSize, Color color, bool centered = false)
+    {
+        // Build the shadow by copying the alpha only; mixing int literals with a
+        // byte argument in a Color constructor would be an ambiguous overload.
+        Color shadow = Color.Black;
+        shadow.A = color.A;
+        DrawText(spriteBatch, text, x + pixelSize, y + pixelSize, pixelSize, shadow, centered);
+        DrawText(spriteBatch, text, x, y, pixelSize, color, centered);
     }
 
     private string[] GetCharPattern(char c)
     {
-        // Basic 5x7 pixel font patterns (centered in 8x8)
         switch (c)
         {
             case 'A': return new[] { "  ##  ", " #  # ", "#    #", "#    #", "######", "#    #", "#    #" };
@@ -96,7 +121,7 @@ public class PixelFont : IDisposable
             case 'F': return new[] { "######", "#     ", "#     ", "####  ", "#     ", "#     ", "#     " };
             case 'G': return new[] { " #### ", "#    #", "#     ", "# ### ", "#   # ", "#   # ", " ### #" };
             case 'H': return new[] { "#    #", "#    #", "#    #", "######", "#    #", "#    #", "#    #" };
-            case 'I': return new[] { "  ##  ", "  ##  ", "  ##  ", "  ##  ", "  ##  ", "  ##  ", "  ##  " };
+            case 'I': return new[] { " #### ", "  ##  ", "  ##  ", "  ##  ", "  ##  ", "  ##  ", " #### " };
             case 'J': return new[] { "     #", "     #", "     #", "     #", "     #", "#    #", " #### " };
             case 'K': return new[] { "#   # ", "#  #  ", "# #   ", "##    ", "# #   ", "#  #  ", "#   # " };
             case 'L': return new[] { "#     ", "#     ", "#     ", "#     ", "#     ", "#     ", "######" };
@@ -130,49 +155,28 @@ public class PixelFont : IDisposable
             case '!': return new[] { "  ##  ", "  ##  ", "  ##  ", "  ##  ", "  ##  ", "      ", "  ##  " };
             case '?': return new[] { " #### ", "#    #", "     #", "   ## ", "  ##  ", "      ", "  ##  " };
             case ':': return new[] { "      ", "  ##  ", "  ##  ", "      ", "  ##  ", "  ##  ", "      " };
+            case ';': return new[] { "      ", "  ##  ", "  ##  ", "      ", "  ##  ", "  ##  ", " #    " };
+            case '\'': return new[] { "  ##  ", "  ##  ", "  #   ", "      ", "      ", "      ", "      " };
+            case '"': return new[] { " ## ##", " ## ##", " #  # ", "      ", "      ", "      ", "      " };
             case '-': return new[] { "      ", "      ", "      ", "######", "      ", "      ", "      " };
             case '+': return new[] { "      ", "  ##  ", "  ##  ", "######", "  ##  ", "  ##  ", "      " };
+            case '=': return new[] { "      ", "      ", "######", "      ", "######", "      ", "      " };
+            case '*': return new[] { "      ", "#  #  ", " ###  ", "##### ", " ###  ", "#  #  ", "      " };
+            case '%': return new[] { "##   #", "##  # ", "   #  ", "  #   ", " #  ##", "#   ##", "      " };
             case '(': return new[] { "   #  ", "  #   ", " #    ", " #    ", " #    ", "  #   ", "   #  " };
             case ')': return new[] { " #    ", "  #   ", "   #  ", "   #  ", "   #  ", "  #   ", " #    " };
+            case '[': return new[] { "  ### ", "  #   ", "  #   ", "  #   ", "  #   ", "  #   ", "  ### " };
+            case ']': return new[] { " ###  ", "   #  ", "   #  ", "   #  ", "   #  ", "   #  ", " ###  " };
             case '<': return new[] { "   #  ", "  #   ", " #    ", "#     ", " #    ", "  #   ", "   #  " };
             case '>': return new[] { " #    ", "  #   ", "   #  ", "    # ", "   #  ", "  #   ", " #    " };
             case '_': return new[] { "      ", "      ", "      ", "      ", "      ", "      ", "######" };
             case '/': return new[] { "     #", "    # ", "   #  ", "  #   ", " #    ", "#     ", "#     " };
+            case '\\': return new[] { "#     ", "#     ", " #    ", "  #   ", "   #  ", "    # ", "     #" };
             case '@': return new[] { " #### ", "#    #", "# ## #", "# ## #", "# ### ", "#     ", " #### " };
+            case '#': return new[] { " #  # ", "######", " #  # ", " #  # ", "######", " #  # ", "      " };
+            case '&': return new[] { " ##   ", "#  #  ", " ##   ", " ## # ", "#  ## ", "#   # ", " ### #" };
             default: return null;
         }
-    }
-
-    public void DrawText(SpriteBatch spriteBatch, string text, int x, int y, int pixelSize, Color color, bool centered = false)
-    {
-        if (_fontTexture == null || string.IsNullOrEmpty(text)) return;
-
-        text = text.ToUpper();
-        int totalWidth = text.Length * _charWidth * pixelSize;
-        int startX = centered ? x - totalWidth / 2 : x;
-        int startY = centered ? y - (_charHeight * pixelSize) / 2 : y;
-
-        for (int i = 0; i < text.Length; i++)
-        {
-            char c = text[i];
-            if (_charMap.ContainsKey(c))
-            {
-                Rectangle sourceRect = _charMap[c];
-                Rectangle destRect = new Rectangle(
-                    startX + i * _charWidth * pixelSize,
-                    startY,
-                    _charWidth * pixelSize,
-                    _charHeight * pixelSize
-                );
-                spriteBatch.Draw(_fontTexture, destRect, sourceRect, color);
-            }
-        }
-    }
-
-    public int MeasureText(string text, int pixelSize)
-    {
-        if (string.IsNullOrEmpty(text)) return 0;
-        return text.Length * _charWidth * pixelSize;
     }
 
     public void Dispose()
