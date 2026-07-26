@@ -237,21 +237,68 @@ public class Game : IDisposable
             assetDir = "assets"; // fallback
         }
 
-        // Load textures with multiple format support
-        string[] imageExtensions = { ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tga" };
-        string[] negroExtensions = { ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tga" };
-        
+        // Load textures with auto-conversion support
+        string imagePath = ImageConverter.EnsureLoadableImage(assetDir, "image");
+        string negroPath = ImageConverter.EnsureLoadableImage(assetDir, "negro");
+        string[] allImageExtensions = { ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tga" };
+
         // Try to load image (intro)
-        _introTexture = LoadTextureWithFallback(assetDir, "image", imageExtensions);
-        if (_introTexture.Width <= 1)
+        if (!string.IsNullOrEmpty(imagePath))
         {
-            Console.WriteLine("Warning: image not found or failed to load, using negro as fallback");
-            _introTexture = LoadTextureWithFallback(assetDir, "negro", negroExtensions);
+            try
+            {
+                Console.WriteLine($"Loading texture: {imagePath}");
+                _introTexture = Raylib.LoadTexture(imagePath);
+                if (_introTexture.Width > 1)
+                {
+                    Console.WriteLine($"  -> SUCCESS: {_introTexture.Width}x{_introTexture.Height}");
+                }
+                else
+                {
+                    Console.WriteLine("Warning: image failed to load properly, using negro as fallback");
+                    _introTexture = LoadTextureWithFallback(assetDir, "negro", allImageExtensions);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Warning: Failed to load image: {ex.Message}");
+                _introTexture = LoadTextureWithFallback(assetDir, "negro", allImageExtensions);
+            }
+        }
+        else
+        {
+            Console.WriteLine("Warning: image not found, using negro as fallback");
+            _introTexture = LoadTextureWithFallback(assetDir, "negro", allImageExtensions);
         }
 
         // Try to load negro (main menu)
-        _mainTexture = LoadTextureWithFallback(assetDir, "negro", negroExtensions);
-        if (_mainTexture.Width <= 1)
+        if (!string.IsNullOrEmpty(negroPath))
+        {
+            try
+            {
+                Console.WriteLine($"Loading texture: {negroPath}");
+                _mainTexture = Raylib.LoadTexture(negroPath);
+                if (_mainTexture.Width > 1)
+                {
+                    Console.WriteLine($"  -> SUCCESS: {_mainTexture.Width}x{_mainTexture.Height}");
+                }
+                else
+                {
+                    Console.WriteLine("Error: negro image failed to load, creating dummy texture");
+                    Image dummyImage = Raylib.GenImageColor(1, 1, Color.DarkGray);
+                    _mainTexture = Raylib.LoadTextureFromImage(dummyImage);
+                    Raylib.UnloadImage(dummyImage);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error: Failed to load negro: {ex.Message}");
+                Image dummyImage = Raylib.GenImageColor(1, 1, Color.DarkGray);
+                _mainTexture = Raylib.LoadTextureFromImage(dummyImage);
+                Raylib.UnloadImage(dummyImage);
+            }
+        }
+        else
         {
             Console.WriteLine("Error: negro image not found, creating dummy texture");
             Image dummyImage = Raylib.GenImageColor(1, 1, Color.DarkGray);
