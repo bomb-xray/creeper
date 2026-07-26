@@ -66,8 +66,8 @@ public class Game1 : Game
     private int _optionsSelected;
     private float _masterVolume = 0.7f;
 
-    // Custom pixel font
-    private PixelFont _font = null!;
+    // Text rendering (TrueType from assets, pixel font fallback)
+    private TextRenderer _text = null!;
 
     // Input
     private KeyboardState _prevKeyboardState;
@@ -77,9 +77,9 @@ public class Game1 : Game
     private int _screenWidth;
     private int _screenHeight;
 
-    // Font scale (pixels per font pixel), derived from the screen height so that
-    // the UI keeps the same proportions on 768p and 1080p displays.
-    private int _uiScale = 3;
+    // Base text height in screen pixels, derived from the screen height so the UI
+    // keeps the same proportions on 768p and 1080p displays.
+    private float _baseTextSize = 24f;
 
     public Game1()
     {
@@ -127,19 +127,24 @@ public class Game1 : Game
         _screenWidth = GraphicsDevice.PresentationParameters.BackBufferWidth;
         _screenHeight = GraphicsDevice.PresentationParameters.BackBufferHeight;
         // 768p -> 3, 1080p -> 4, 1440p -> 5 ...
-        _uiScale = Math.Max(2, (int)MathF.Round(_screenHeight / 260f));
-        Console.WriteLine($"Screen: {_screenWidth}x{_screenHeight} (ui scale {_uiScale})");
+        // ~3.1% of the screen height: 24px at 768p, 34px at 1080p.
+        _baseTextSize = MathF.Max(14f, _screenHeight * 0.031f);
+        Console.WriteLine($"Screen: {_screenWidth}x{_screenHeight} (base text {_baseTextSize:0}px)");
     }
 
     protected override void LoadContent()
     {
         _spriteBatch = new SpriteBatch(GraphicsDevice);
-        _font = new PixelFont(GraphicsDevice);
 
         _pixel = new Texture2D(GraphicsDevice, 1, 1);
         _pixel.SetData(new[] { Color.White });
 
         string assetDir = FindAssetDirectory();
+
+        // Picks up a .ttf/.otf from the assets folder, otherwise falls back to
+        // the built-in pixel font.
+        _text = new TextRenderer(GraphicsDevice, assetDir);
+
         LoadAssets(assetDir);
     }
 
@@ -575,9 +580,10 @@ public class Game1 : Game
 
         if (_state == GameState.IntroWaiting && _blinkVisible)
         {
-            int promptY = Math.Min(y + height + _uiScale * 10, _screenHeight - _uiScale * 10);
-            _font.DrawTextShadowed(_spriteBatch, "PRESS ANY KEY TO CONTINUE",
-                _screenWidth / 2, promptY, _uiScale,
+            float promptSize = _baseTextSize;
+            int promptY = (int)MathF.Min(y + height + promptSize, _screenHeight - promptSize);
+            _text.DrawShadowed(_spriteBatch, "PRESS ANY KEY TO CONTINUE",
+                _screenWidth / 2f, promptY, promptSize,
                 WithAlpha(new Color(230, 230, 230), _introAlpha), true);
         }
     }
@@ -616,11 +622,11 @@ public class Game1 : Game
         }
 
         string[] labels = { "PLAY", "OPTIONS", "EXIT" };
-        int menuScale = _uiScale + 1;
-        int spacing = menuScale * 16;
+        float menuSize = _baseTextSize * 1.35f;
+        float spacing = menuSize * 1.6f;
         // The menu sits directly on the artwork; the drop shadow on each glyph
         // is what keeps it readable, so no backdrop is drawn.
-        int menuStartY = _screenHeight - spacing * 3;
+        float menuStartY = _screenHeight - spacing * 3f;
 
         for (int i = 0; i < labels.Length; i++)
         {
@@ -632,15 +638,15 @@ public class Game1 : Game
                 ? WithAlpha(new Color(220, 40, 40), alpha)
                 : WithAlpha(new Color(205, 205, 205), alpha * 0.85f);
 
-            int y = menuStartY + i * spacing;
-            _font.DrawTextShadowed(_spriteBatch, labels[i], _screenWidth / 2, y, menuScale, color, true);
+            float y = menuStartY + i * spacing;
+            _text.DrawShadowed(_spriteBatch, labels[i], _screenWidth / 2f, y, menuSize, color, true);
 
             if (selected)
             {
-                int halfWidth = _font.MeasureText(labels[i], menuScale) / 2;
-                int arrowGap = menuScale * 7;
-                _font.DrawTextShadowed(_spriteBatch, ">", _screenWidth / 2 - halfWidth - arrowGap, y, menuScale, color, true);
-                _font.DrawTextShadowed(_spriteBatch, "<", _screenWidth / 2 + halfWidth + arrowGap, y, menuScale, color, true);
+                float halfWidth = _text.Measure(labels[i], menuSize).X / 2f;
+                float arrowGap = menuSize * 0.9f;
+                _text.DrawShadowed(_spriteBatch, ">", _screenWidth / 2f - halfWidth - arrowGap, y, menuSize, color, true);
+                _text.DrawShadowed(_spriteBatch, "<", _screenWidth / 2f + halfWidth + arrowGap, y, menuSize, color, true);
             }
         }
     }
@@ -649,10 +655,10 @@ public class Game1 : Game
     {
         _spriteBatch.Draw(_pixel, new Rectangle(0, 0, _screenWidth, _screenHeight), new Color(0, 0, 0, 215));
 
-        int titleScale = _uiScale + 2;
-        int itemScale = _uiScale + 1;
-        int hintScale = Math.Max(2, _uiScale - 1);
-        _font.DrawTextShadowed(_spriteBatch, "OPTIONS", _screenWidth / 2, (int)(_screenHeight * 0.22f), titleScale, Color.White, true);
+        float titleSize = _baseTextSize * 1.8f;
+        float itemSize = _baseTextSize * 1.2f;
+        float hintSize = _baseTextSize * 0.8f;
+        _text.DrawShadowed(_spriteBatch, "OPTIONS", _screenWidth / 2f, _screenHeight * 0.22f, titleSize, Color.White, true);
 
         string[] labels =
         {
@@ -661,28 +667,28 @@ public class Game1 : Game
             "BACK"
         };
 
-        int startY = (int)(_screenHeight * 0.42f);
-        int spacing = itemScale * 16;
+        float startY = _screenHeight * 0.42f;
+        float spacing = itemSize * 1.9f;
 
         for (int i = 0; i < labels.Length; i++)
         {
             bool selected = i == _optionsSelected;
             Color color = selected ? new Color(220, 40, 40) : new Color(200, 200, 200);
-            int y = startY + i * spacing;
+            float y = startY + i * spacing;
 
-            _font.DrawTextShadowed(_spriteBatch, labels[i], _screenWidth / 2, y, itemScale, color, true);
+            _text.DrawShadowed(_spriteBatch, labels[i], _screenWidth / 2f, y, itemSize, color, true);
 
             if (selected)
             {
-                int halfWidth = _font.MeasureText(labels[i], itemScale) / 2;
-                int arrowGap = itemScale * 7;
-                _font.DrawTextShadowed(_spriteBatch, ">", _screenWidth / 2 - halfWidth - arrowGap, y, itemScale, color, true);
-                _font.DrawTextShadowed(_spriteBatch, "<", _screenWidth / 2 + halfWidth + arrowGap, y, itemScale, color, true);
+                float halfWidth = _text.Measure(labels[i], itemSize).X / 2f;
+                float arrowGap = itemSize * 0.9f;
+                _text.DrawShadowed(_spriteBatch, ">", _screenWidth / 2f - halfWidth - arrowGap, y, itemSize, color, true);
+                _text.DrawShadowed(_spriteBatch, "<", _screenWidth / 2f + halfWidth + arrowGap, y, itemSize, color, true);
             }
         }
 
-        _font.DrawTextShadowed(_spriteBatch, "LEFT / RIGHT - CHANGE    ESC - BACK",
-            _screenWidth / 2, _screenHeight - hintScale * 12, hintScale,
+        _text.DrawShadowed(_spriteBatch, "LEFT / RIGHT - CHANGE    ESC - BACK",
+            _screenWidth / 2f, _screenHeight - hintSize * 2.5f, hintSize,
             new Color(150, 150, 150), true);
     }
 
@@ -698,7 +704,7 @@ public class Game1 : Game
 
         float alpha = MathF.Min(1f, _toastTimer / 0.5f);
         int y = (int)(_screenHeight * 0.62f);
-        _font.DrawTextShadowed(_spriteBatch, _toastText, _screenWidth / 2, y, _uiScale + 1,
+        _text.DrawShadowed(_spriteBatch, _toastText, _screenWidth / 2f, y, _baseTextSize * 1.1f,
             WithAlpha(new Color(255, 230, 120), alpha), true);
     }
 
@@ -711,7 +717,7 @@ public class Game1 : Game
         _introTexture?.Dispose();
         if (!ReferenceEquals(_mainTexture, _introTexture)) _mainTexture?.Dispose();
         _pixel?.Dispose();
-        _font?.Dispose();
+        _text?.Dispose();
 
         base.UnloadContent();
     }

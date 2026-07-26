@@ -8,7 +8,7 @@
 - 🎨 صفحه‌ی intro با fade-in و متن چشمک‌زن
 - 🔀 ترنزیشن نرم: fade-out تصویر اول + fade-in تصویر منو
 - 🎵 موزیک پس‌زمینه‌ی لوپ‌شونده + افکت صوتی کلیک
-- 🔤 فونت پیکسلی که در runtime ساخته می‌شود (بدون فایل فونت خارجی)
+- 🔤 پشتیبانی از فونت TrueType دلخواه (`.ttf`/`.otf`) با fallback به فونت پیکسلی داخلی
 - ⌨️ کنترل کامل با کیبورد، نشانگر موس مخفی
 - 🔁 تبدیل خودکار فرمت‌های تصویر و صوت پشتیبانی‌نشده
 
@@ -38,6 +38,11 @@ dotnet run -c Release
 | `negro` | تصویر منوی اصلی (تمام صفحه) | همان بالا |
 | `untrust` | موزیک پس‌زمینه | `wav`, `mp3`, `m4a`, `aac`, `wma`, `flac`, `aiff`, `ogg` |
 | `click` | افکت صوتی منو | همان بالا |
+| `Fenglish` | فونت متن‌های بازی | `ttf`, `otf` |
+
+**فونت چطور انتخاب می‌شود؟**
+
+اولین `.ttf` یا `.otf` موجود در `assets/` به‌صورت خودکار لود می‌شود. اگر چند فایل باشد، اولویت با نام‌های `fenglish`, `font`, `main` است. اگر هیچ فونتی نباشد، بازی به فونت پیکسلی داخلی (`PixelFont.cs`) برمی‌گردد و باز هم اجرا می‌شود.
 
 **تبدیل خودکار چطور کار می‌کند؟**
 
@@ -64,7 +69,8 @@ creeper/
 ├── CreeperGame.csproj   # پروژه و پکیج‌ها
 ├── Program.cs           # نقطه‌ی ورود + گزارش کرش
 ├── Game1.cs             # حلقه‌ی بازی، state machine، رندر
-├── PixelFont.cs         # فونت بیت‌مپ ۶×۷ که در runtime ساخته می‌شود
+├── TextRenderer.cs      # لایه‌ی متن: TTF با FontStashSharp + fallback
+├── PixelFont.cs         # فونت بیت‌مپ ۶×۷ (fallback داخلی)
 ├── ImageConverter.cs    # تبدیل تصویر → PNG
 ├── AudioConverter.cs    # تبدیل صوت → WAV
 └── assets/              # تصاویر و صداها
@@ -80,5 +86,6 @@ creeper/
 
 - **C#** روی **.NET 8**
 - **MonoGame.Framework.DesktopGL** — همان فریمورکی که Stardew Valley و Celeste با آن ساخته شده‌اند
+- **FontStashSharp** — رندر فونت TrueType
 - **NAudio** — تبدیل صوت
 - **SixLabors.ImageSharp** — تبدیل تصویر

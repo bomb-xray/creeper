@@ -98,17 +98,6 @@ public class PixelFont : IDisposable
         }
     }
 
-    /// <summary>Draws text with a hard pixel shadow so it stays readable over any image.</summary>
-    public void DrawTextShadowed(SpriteBatch spriteBatch, string text, int x, int y, int pixelSize, Color color, bool centered = false)
-    {
-        // Build the shadow by copying the alpha only; mixing int literals with a
-        // byte argument in a Color constructor would be an ambiguous overload.
-        Color shadow = Color.Black;
-        shadow.A = color.A;
-        DrawText(spriteBatch, text, x + pixelSize, y + pixelSize, pixelSize, shadow, centered);
-        DrawText(spriteBatch, text, x, y, pixelSize, color, centered);
-    }
-
     private string[] GetCharPattern(char c)
     {
         switch (c)
