@@ -1,7 +1,9 @@
 using Microsoft.Xna.Framework.Audio;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 
 namespace CreeperGame;
 
@@ -17,6 +19,9 @@ public static class FFmpeg
 
     /// <summary>Directory that holds the game assets; set once at startup.</summary>
     public static string AssetDirectory { get; set; } = "assets";
+
+    /// <summary>True when an ffmpeg executable is available, so the UI can say so.</summary>
+    public static bool IsAvailable => FindExecutable() != null;
 
     /// <summary>
     /// Returns a usable ffmpeg path, or null. The result is cached, including the
@@ -55,6 +60,67 @@ public static class FFmpeg
             _cachedPath = exeName;
             Console.WriteLine("Found ffmpeg on PATH.");
             return _cachedPath;
+        }
+
+        // winget and choco install ffmpeg into versioned folders that are not
+        // always on PATH for an already-open shell, so check the usual spots.
+        if (OperatingSystem.IsWindows())
+        {
+            string? found = SearchWindowsInstallLocations(exeName);
+            if (found != null)
+            {
+                _cachedPath = found;
+                Console.WriteLine($"Found ffmpeg: {_cachedPath}");
+                return _cachedPath;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? SearchWindowsInstallLocations(string exeName)
+    {
+        var roots = new List<string>();
+
+        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (!string.IsNullOrEmpty(localAppData))
+        {
+            roots.Add(Path.Combine(localAppData, "Microsoft", "WinGet", "Packages"));
+        }
+
+        string programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+        if (!string.IsNullOrEmpty(programData))
+        {
+            roots.Add(Path.Combine(programData, "chocolatey", "bin"));
+        }
+
+        foreach (var special in new[] { Environment.SpecialFolder.ProgramFiles,
+                                        Environment.SpecialFolder.ProgramFilesX86 })
+        {
+            string dir = Environment.GetFolderPath(special);
+            if (!string.IsNullOrEmpty(dir)) roots.Add(Path.Combine(dir, "ffmpeg"));
+        }
+
+        foreach (string root in roots)
+        {
+            try
+            {
+                if (!Directory.Exists(root)) continue;
+
+                string direct = Path.Combine(root, exeName);
+                if (File.Exists(direct)) return direct;
+
+                // Bounded recursive search: these trees are small.
+                string? nested = Directory
+                    .EnumerateFiles(root, exeName, SearchOption.AllDirectories)
+                    .FirstOrDefault();
+
+                if (nested != null) return nested;
+            }
+            catch
+            {
+                // Permission problems on a folder are not worth reporting.
+            }
         }
 
         return null;

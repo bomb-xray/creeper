@@ -47,7 +47,13 @@ dotnet run -c Release
 
 فایل ویدیو را با نام `opening` (یا `intro`, `cutscene`) در `assets/` بگذارید.
 
-> ⚠️ **نیازمند ffmpeg:** بک‌اند DesktopGL در MonoGame اصلاً کلاس `VideoPlayer` ندارد، برای همین ویدیو از طریق `ffmpeg` دیکود می‌شود. `ffmpeg.exe` را در پوشه‌ی `assets/` (یا کنار فایل اجرایی، یا در PATH سیستم) قرار دهید.
+> ⚠️ **نیازمند ffmpeg:** بک‌اند DesktopGL در MonoGame اصلاً کلاس `VideoPlayer` ندارد، برای همین ویدیو از طریق `ffmpeg` دیکود می‌شود.
+>
+> ساده‌ترین راه نصب روی ویندوز:
+> ```powershell
+> winget install --id Gyan.FFmpeg -e
+> ```
+> یا `ffmpeg.exe` را دستی در پوشه‌ی `assets/` بگذارید. بازی این مسیرها را چک می‌کند: پوشه‌ی `assets/`، کنار فایل اجرایی، `PATH`، و مسیرهای نصب winget/chocolatey.
 >
 > اگر ffmpeg نصب نباشد بازی کرش نمی‌کند — فقط ویدیو رد می‌شود و مستقیم به صفحه‌ی COMING SOON می‌رود.
 

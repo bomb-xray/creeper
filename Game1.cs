@@ -83,6 +83,12 @@ public class Game1 : Game
     private float _comingSoonTimer;
     private bool _comingSoonSkippable;
 
+    /// <summary>Set when the card follows a brand new run rather than a continue.</summary>
+    private bool _comingSoonFromNewGame;
+
+    /// <summary>Why the opening video did not play, shown on the card. Empty when it did.</summary>
+    private string _videoSkipReason = string.Empty;
+
     // Text rendering (TrueType from assets, pixel font fallback)
     private TextRenderer _text = null!;
 
@@ -616,9 +622,12 @@ public class Game1 : Game
     private void SelectSlot(int index)
     {
         bool isNewGame = !_saves[index].Exists;
+        _comingSoonFromNewGame = isNewGame;
+        _videoSkipReason = string.Empty;
 
         if (isNewGame)
         {
+            Console.WriteLine($"Starting a new run in slot {index + 1}");
             _saves.CreateNew(index);
             StartOpeningVideo();
         }
@@ -638,6 +647,7 @@ public class Game1 : Game
         if (videoPath == null)
         {
             Console.WriteLine("No opening video found in assets; skipping to the end card.");
+            _videoSkipReason = "NO OPENING VIDEO IN ASSETS";
             EnterComingSoon();
             return;
         }
@@ -651,6 +661,7 @@ public class Game1 : Game
         {
             // ffmpeg missing or refused to start: do not punish the player.
             try { _musicInstance?.Resume(); } catch { /* not fatal */ }
+            _videoSkipReason = "VIDEO SKIPPED - FFMPEG NOT FOUND";
             EnterComingSoon();
             return;
         }
@@ -997,6 +1008,14 @@ public class Game1 : Game
         _text.DrawShadowed(_spriteBatch, hint, _screenWidth / 2f,
             _screenHeight - hintSize * 3f, hintSize,
             WithAlpha(new Color(150, 150, 150), _fileSelectAlpha), true);
+
+        // Warn up front on an empty slot, since that is the one that wants a video.
+        if (!_saves[_slotSelected].Exists && !FFmpeg.IsAvailable)
+        {
+            _text.DrawShadowed(_spriteBatch, "FFMPEG NOT FOUND - OPENING VIDEO WILL BE SKIPPED",
+                _screenWidth / 2f, _screenHeight - hintSize * 1.4f, hintSize * 0.9f,
+                WithAlpha(new Color(120, 100, 60), _fileSelectAlpha), true);
+        }
     }
 
     /// <summary>Draws a hollow rectangle out of four thin filled quads.</summary>
@@ -1031,24 +1050,36 @@ public class Game1 : Game
         // Ease the card in over the first half second.
         float alpha = MathF.Min(1f, _comingSoonTimer / 0.5f);
 
+        // Saying which path got here makes the two flows distinguishable even
+        // when the opening video could not be played.
+        _text.DrawShadowed(_spriteBatch,
+            _comingSoonFromNewGame ? "A NEW STORY BEGINS" : "WELCOME BACK",
+            _screenWidth / 2f, _screenHeight * 0.36f, _baseTextSize * 0.85f,
+            WithAlpha(new Color(150, 150, 150), alpha), true);
+
         _text.DrawShadowed(_spriteBatch, "COMING SOON", _screenWidth / 2f,
-            _screenHeight * 0.46f, _baseTextSize * 2f,
+            _screenHeight * 0.47f, _baseTextSize * 2f,
             WithAlpha(new Color(220, 40, 40), alpha), true);
 
         _text.DrawShadowed(_spriteBatch, "THE STORY IS STILL BEING WRITTEN",
-            _screenWidth / 2f, _screenHeight * 0.56f, _baseTextSize * 0.8f,
+            _screenWidth / 2f, _screenHeight * 0.57f, _baseTextSize * 0.8f,
             WithAlpha(new Color(170, 170, 170), alpha), true);
 
-        if (_comingSoonSkippable)
+        // Only relevant on a new run, where a video was actually expected.
+        if (_comingSoonFromNewGame && _videoSkipReason.Length > 0)
+        {
+            _text.DrawShadowed(_spriteBatch, _videoSkipReason, _screenWidth / 2f,
+                _screenHeight * 0.65f, _baseTextSize * 0.65f,
+                WithAlpha(new Color(120, 100, 60), alpha), true);
+        }
+
+        if (_comingSoonSkippable && _blinkVisible)
         {
             // Reuse the intro blink so the prompt feels consistent.
-            if (_blinkVisible)
-            {
-                float hintSize = _baseTextSize * 0.7f;
-                _text.DrawShadowed(_spriteBatch, "PRESS ANY KEY TO RETURN", _screenWidth / 2f,
-                    _screenHeight - hintSize * 3f, hintSize,
-                    WithAlpha(new Color(150, 150, 150), alpha), true);
-            }
+            float hintSize = _baseTextSize * 0.7f;
+            _text.DrawShadowed(_spriteBatch, "PRESS ANY KEY TO RETURN", _screenWidth / 2f,
+                _screenHeight - hintSize * 3f, hintSize,
+                WithAlpha(new Color(150, 150, 150), alpha), true);
         }
     }
 

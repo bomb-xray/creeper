@@ -33,7 +33,7 @@ public class PixelFont : IDisposable
         for (int code = 32; code < 127; code++)
         {
             char c = (char)code;
-            string[] pattern = GetCharPattern(c);
+            string[]? pattern = GetCharPattern(c);
             if (pattern == null) continue;
 
             int cellX = (code % Columns) * CellSize;
@@ -98,7 +98,7 @@ public class PixelFont : IDisposable
         }
     }
 
-    private string[] GetCharPattern(char c)
+    private string[]? GetCharPattern(char c)
     {
         switch (c)
         {
