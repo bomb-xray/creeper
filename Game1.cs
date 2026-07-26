@@ -12,7 +12,10 @@ public enum GameState
     IntroFadeIn,
     IntroWaiting,
     Transition,
-    MainMenu
+    MainMenu,
+    FileSelect,
+    OpeningVideo,
+    ComingSoon
 }
 
 public enum MenuOption
@@ -65,6 +68,20 @@ public class Game1 : Game
     private bool _showingOptions;
     private int _optionsSelected;
     private float _masterVolume = 0.7f;
+
+    // File select (three save slots)
+    private SaveSlots _saves = null!;
+    private int _slotSelected;
+    private float _fileSelectAlpha;
+
+    // Opening video, played once when a brand new run is started
+    private VideoPlayback? _video;
+    private float _videoFadeAlpha;
+    private string _assetDir = "assets";
+
+    // "Coming soon" end card shown after the video / when loading an existing run
+    private float _comingSoonTimer;
+    private bool _comingSoonSkippable;
 
     // Text rendering (TrueType from assets, pixel font fallback)
     private TextRenderer _text = null!;
@@ -139,13 +156,16 @@ public class Game1 : Game
         _pixel = new Texture2D(GraphicsDevice, 1, 1);
         _pixel.SetData(new[] { Color.White });
 
-        string assetDir = FindAssetDirectory();
+        _assetDir = FindAssetDirectory();
+        FFmpeg.AssetDirectory = _assetDir;
 
         // Picks up a .ttf/.otf from the assets folder, otherwise falls back to
         // the built-in pixel font.
-        _text = new TextRenderer(GraphicsDevice, assetDir);
+        _text = new TextRenderer(GraphicsDevice, _assetDir);
 
-        LoadAssets(assetDir);
+        _saves = new SaveSlots(_assetDir);
+
+        LoadAssets(_assetDir);
     }
 
     private string FindAssetDirectory()
@@ -300,9 +320,7 @@ public class Game1 : Game
 
         if (WasKeyPressed(kb, Keys.Escape))
         {
-            // Inside the options panel ESC goes back, everywhere else it quits.
-            if (_showingOptions) _showingOptions = false;
-            else Exit();
+            HandleEscape();
         }
 
         if (WasKeyPressed(kb, Keys.F11))
@@ -312,13 +330,21 @@ public class Game1 : Game
 
         if (_toastTimer > 0f) _toastTimer -= dt;
 
+        // Shared blink used by the intro prompt and the coming-soon card.
+        _blinkTimer += dt;
+        if (_blinkTimer >= 0.55f)
+        {
+            _blinkTimer = 0f;
+            _blinkVisible = !_blinkVisible;
+        }
+
         switch (_state)
         {
             case GameState.IntroFadeIn:
                 UpdateIntroFadeIn(dt);
                 break;
             case GameState.IntroWaiting:
-                UpdateIntroWaiting(dt, kb, mouse);
+                UpdateIntroWaiting(kb, mouse);
                 break;
             case GameState.Transition:
                 UpdateTransition(dt);
@@ -326,11 +352,52 @@ public class Game1 : Game
             case GameState.MainMenu:
                 UpdateMainMenu(dt, kb);
                 break;
+            case GameState.FileSelect:
+                UpdateFileSelect(dt, kb);
+                break;
+            case GameState.OpeningVideo:
+                UpdateOpeningVideo(dt, kb);
+                break;
+            case GameState.ComingSoon:
+                UpdateComingSoon(dt, kb);
+                break;
         }
 
         _prevKeyboardState = kb;
         _prevMouseState = mouse;
         base.Update(gameTime);
+    }
+
+    /// <summary>ESC steps back one screen, and quits only from the main menu.</summary>
+    private void HandleEscape()
+    {
+        if (_showingOptions)
+        {
+            _showingOptions = false;
+            return;
+        }
+
+        switch (_state)
+        {
+            case GameState.FileSelect:
+                PlayClick();
+                _state = GameState.MainMenu;
+                break;
+
+            case GameState.OpeningVideo:
+                // Skipping the video jumps straight to the end card.
+                StopVideo();
+                EnterComingSoon();
+                break;
+
+            case GameState.ComingSoon:
+                ReturnToMenu();
+                break;
+
+            default:
+                Exit();
+                break;
+        }
     }
 
     private void ToggleFullscreen()
@@ -361,15 +428,8 @@ public class Game1 : Game
         }
     }
 
-    private void UpdateIntroWaiting(float dt, KeyboardState kb, MouseState mouse)
+    private void UpdateIntroWaiting(KeyboardState kb, MouseState mouse)
     {
-        _blinkTimer += dt;
-        if (_blinkTimer >= 0.55f)
-        {
-            _blinkTimer = 0f;
-            _blinkVisible = !_blinkVisible;
-        }
-
         bool anyKey = kb.GetPressedKeys().Length > 0 && _prevKeyboardState.GetPressedKeys().Length == 0;
         bool anyClick = mouse.LeftButton == ButtonState.Pressed && _prevMouseState.LeftButton == ButtonState.Released;
 
@@ -445,7 +505,9 @@ public class Game1 : Game
             switch (_selectedOption)
             {
                 case MenuOption.Play:
-                    ShowToast("COMING SOON");
+                    _state = GameState.FileSelect;
+                    _slotSelected = 0;
+                    _fileSelectAlpha = 0f;
                     break;
                 case MenuOption.Options:
                     _showingOptions = true;
@@ -513,6 +575,175 @@ public class Game1 : Game
         }
     }
 
+    // ---------------------------------------------------------------- file select
+
+    private void UpdateFileSelect(float dt, KeyboardState kb)
+    {
+        PlayMusic();
+        _fileSelectAlpha = MathF.Min(1f, _fileSelectAlpha + dt * 4f);
+
+        if (WasKeyPressed(kb, Keys.Up) || WasKeyPressed(kb, Keys.W))
+        {
+            _slotSelected = (_slotSelected - 1 + SaveSlots.SlotCount) % SaveSlots.SlotCount;
+            PlayClick();
+        }
+
+        if (WasKeyPressed(kb, Keys.Down) || WasKeyPressed(kb, Keys.S))
+        {
+            _slotSelected = (_slotSelected + 1) % SaveSlots.SlotCount;
+            PlayClick();
+        }
+
+        // Erasing a slot frees it up again for a fresh run.
+        if (WasKeyPressed(kb, Keys.Delete) && _saves[_slotSelected].Exists)
+        {
+            PlayClick();
+            _saves.Erase(_slotSelected);
+            ShowToast($"SLOT {_slotSelected + 1} ERASED");
+        }
+
+        if (WasKeyPressed(kb, Keys.Enter) || WasKeyPressed(kb, Keys.Space) || WasKeyPressed(kb, Keys.Z))
+        {
+            PlayClick();
+            SelectSlot(_slotSelected);
+        }
+    }
+
+    /// <summary>
+    /// A brand new run plays the opening video first; an existing one goes
+    /// straight to the end card.
+    /// </summary>
+    private void SelectSlot(int index)
+    {
+        bool isNewGame = !_saves[index].Exists;
+
+        if (isNewGame)
+        {
+            _saves.CreateNew(index);
+            StartOpeningVideo();
+        }
+        else
+        {
+            Console.WriteLine($"Continuing save slot {index + 1}: {_saves[index].Name}");
+            EnterComingSoon();
+        }
+    }
+
+    // -------------------------------------------------------------- opening video
+
+    private void StartOpeningVideo()
+    {
+        string? videoPath = FindOpeningVideo();
+
+        if (videoPath == null)
+        {
+            Console.WriteLine("No opening video found in assets; skipping to the end card.");
+            EnterComingSoon();
+            return;
+        }
+
+        // The video carries its own audio, so the menu music steps aside.
+        try { _musicInstance?.Pause(); } catch { /* not fatal */ }
+
+        _video = VideoPlayback.TryStart(GraphicsDevice, videoPath, _screenWidth, _screenHeight, _masterVolume);
+
+        if (_video == null)
+        {
+            // ffmpeg missing or refused to start: do not punish the player.
+            try { _musicInstance?.Resume(); } catch { /* not fatal */ }
+            EnterComingSoon();
+            return;
+        }
+
+        _videoFadeAlpha = 0f;
+        _state = GameState.OpeningVideo;
+    }
+
+    /// <summary>Looks for an opening video under a few conventional names.</summary>
+    private string? FindOpeningVideo()
+    {
+        string[] names = { "opening", "intro", "opening_video", "cutscene" };
+        string[] extensions = { ".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v", ".wmv" };
+
+        foreach (string name in names)
+        {
+            foreach (string ext in extensions)
+            {
+                string path = Path.Combine(_assetDir, name + ext);
+                if (File.Exists(path)) return path;
+            }
+        }
+
+        return null;
+    }
+
+    private void UpdateOpeningVideo(float dt, KeyboardState kb)
+    {
+        if (_video == null)
+        {
+            EnterComingSoon();
+            return;
+        }
+
+        _video.Update();
+
+        // Fade the first frame in so playback does not start with a hard cut.
+        _videoFadeAlpha = MathF.Min(1f, _videoFadeAlpha + dt * 2f);
+
+        // Any key skips the cutscene.
+        bool skip = kb.GetPressedKeys().Length > 0 && _prevKeyboardState.GetPressedKeys().Length == 0;
+
+        if (skip || _video.Finished)
+        {
+            StopVideo();
+            EnterComingSoon();
+        }
+    }
+
+    private void StopVideo()
+    {
+        if (_video == null) return;
+
+        _video.Dispose();
+        _video = null;
+
+        try { _musicInstance?.Resume(); } catch { /* not fatal */ }
+    }
+
+    // ----------------------------------------------------------------- coming soon
+
+    private void EnterComingSoon()
+    {
+        _state = GameState.ComingSoon;
+        _comingSoonTimer = 0f;
+        _comingSoonSkippable = false;
+        PlayMusic();
+    }
+
+    private void UpdateComingSoon(float dt, KeyboardState kb)
+    {
+        PlayMusic();
+        _comingSoonTimer += dt;
+
+        // Short grace period so a key held down during the video does not
+        // dismiss the card instantly.
+        if (_comingSoonTimer > 0.8f) _comingSoonSkippable = true;
+
+        bool pressed = kb.GetPressedKeys().Length > 0 && _prevKeyboardState.GetPressedKeys().Length == 0;
+
+        if (_comingSoonSkippable && pressed)
+        {
+            ReturnToMenu();
+        }
+    }
+
+    private void ReturnToMenu()
+    {
+        PlayClick();
+        StopVideo();
+        _state = GameState.MainMenu;
+    }
+
     private bool WasKeyPressed(KeyboardState current, Keys key)
         => current.IsKeyDown(key) && _prevKeyboardState.IsKeyUp(key);
 
@@ -536,6 +767,15 @@ public class Game1 : Game
                 break;
             case GameState.MainMenu:
                 DrawMainMenuScreen();
+                break;
+            case GameState.FileSelect:
+                DrawFileSelectScreen();
+                break;
+            case GameState.OpeningVideo:
+                DrawOpeningVideoScreen();
+                break;
+            case GameState.ComingSoon:
+                DrawComingSoonScreen();
                 break;
         }
 
@@ -692,6 +932,126 @@ public class Game1 : Game
             new Color(150, 150, 150), true);
     }
 
+    private void DrawFileSelectScreen()
+    {
+        // Keep the menu artwork visible but pushed back behind the panel.
+        if (_mainTexture != null) DrawStretched(_mainTexture, 1f);
+        _spriteBatch.Draw(_pixel, new Rectangle(0, 0, _screenWidth, _screenHeight),
+            WithAlpha(Color.Black, 0.82f * _fileSelectAlpha));
+
+        float titleSize = _baseTextSize * 1.5f;
+        float nameSize = _baseTextSize * 1.15f;
+        float infoSize = _baseTextSize * 0.75f;
+        float hintSize = _baseTextSize * 0.7f;
+
+        _text.DrawShadowed(_spriteBatch, "SELECT A FILE", _screenWidth / 2f,
+            _screenHeight * 0.16f, titleSize, WithAlpha(Color.White, _fileSelectAlpha), true);
+
+        float rowHeight = _screenHeight * 0.145f;
+        float firstRowY = _screenHeight * 0.33f;
+        float boxWidth = MathF.Min(_screenWidth * 0.62f, 680f * (_screenHeight / 768f));
+        float boxLeft = (_screenWidth - boxWidth) / 2f;
+
+        for (int i = 0; i < SaveSlots.SlotCount; i++)
+        {
+            SaveSlot slot = _saves[i];
+            bool selected = i == _slotSelected;
+            float rowY = firstRowY + i * rowHeight;
+            float boxHeight = rowHeight * 0.78f;
+
+            // Selection highlight behind the row.
+            var box = new Rectangle((int)boxLeft, (int)rowY, (int)boxWidth, (int)boxHeight);
+            _spriteBatch.Draw(_pixel, box,
+                WithAlpha(selected ? new Color(70, 20, 20) : new Color(20, 20, 20),
+                    (selected ? 0.85f : 0.55f) * _fileSelectAlpha));
+
+            DrawBorder(box, selected ? new Color(220, 40, 40) : new Color(90, 90, 90),
+                selected ? 2 : 1, _fileSelectAlpha);
+
+            Color nameColor = slot.Exists
+                ? (selected ? new Color(255, 230, 120) : new Color(215, 215, 215))
+                : (selected ? new Color(220, 40, 40) : new Color(130, 130, 130));
+
+            float textLeft = boxLeft + boxWidth * 0.06f;
+
+            _text.DrawShadowed(_spriteBatch, $"{i + 1}.  {slot.Title}",
+                textLeft, rowY + boxHeight * 0.22f, nameSize,
+                WithAlpha(nameColor, _fileSelectAlpha), false);
+
+            _text.DrawShadowed(_spriteBatch, slot.Summary,
+                textLeft, rowY + boxHeight * 0.62f, infoSize,
+                WithAlpha(new Color(160, 160, 160), _fileSelectAlpha), false);
+
+            if (selected)
+            {
+                _text.DrawShadowed(_spriteBatch, ">",
+                    boxLeft - _baseTextSize, rowY + boxHeight / 2f, nameSize,
+                    WithAlpha(new Color(220, 40, 40), _fileSelectAlpha), true);
+            }
+        }
+
+        string hint = _saves[_slotSelected].Exists
+            ? "ENTER - CONTINUE    DEL - ERASE    ESC - BACK"
+            : "ENTER - BEGIN A NEW STORY    ESC - BACK";
+
+        _text.DrawShadowed(_spriteBatch, hint, _screenWidth / 2f,
+            _screenHeight - hintSize * 3f, hintSize,
+            WithAlpha(new Color(150, 150, 150), _fileSelectAlpha), true);
+    }
+
+    /// <summary>Draws a hollow rectangle out of four thin filled quads.</summary>
+    private void DrawBorder(Rectangle rect, Color color, int thickness, float alpha)
+    {
+        Color c = WithAlpha(color, alpha);
+        _spriteBatch.Draw(_pixel, new Rectangle(rect.X, rect.Y, rect.Width, thickness), c);
+        _spriteBatch.Draw(_pixel, new Rectangle(rect.X, rect.Bottom - thickness, rect.Width, thickness), c);
+        _spriteBatch.Draw(_pixel, new Rectangle(rect.X, rect.Y, thickness, rect.Height), c);
+        _spriteBatch.Draw(_pixel, new Rectangle(rect.Right - thickness, rect.Y, thickness, rect.Height), c);
+    }
+
+    private void DrawOpeningVideoScreen()
+    {
+        // Letterboxing is baked into the decoded frame, so a full stretch is correct.
+        if (_video is { HasFrame: true })
+        {
+            _spriteBatch.Draw(_video.Texture, new Rectangle(0, 0, _screenWidth, _screenHeight),
+                Tint(_videoFadeAlpha));
+        }
+
+        float hintSize = _baseTextSize * 0.7f;
+        _text.DrawShadowed(_spriteBatch, "PRESS ANY KEY TO SKIP", _screenWidth / 2f,
+            _screenHeight - hintSize * 2.5f, hintSize,
+            WithAlpha(new Color(150, 150, 150), 0.75f * _videoFadeAlpha), true);
+    }
+
+    private void DrawComingSoonScreen()
+    {
+        _spriteBatch.Draw(_pixel, new Rectangle(0, 0, _screenWidth, _screenHeight), Color.Black);
+
+        // Ease the card in over the first half second.
+        float alpha = MathF.Min(1f, _comingSoonTimer / 0.5f);
+
+        _text.DrawShadowed(_spriteBatch, "COMING SOON", _screenWidth / 2f,
+            _screenHeight * 0.46f, _baseTextSize * 2f,
+            WithAlpha(new Color(220, 40, 40), alpha), true);
+
+        _text.DrawShadowed(_spriteBatch, "THE STORY IS STILL BEING WRITTEN",
+            _screenWidth / 2f, _screenHeight * 0.56f, _baseTextSize * 0.8f,
+            WithAlpha(new Color(170, 170, 170), alpha), true);
+
+        if (_comingSoonSkippable)
+        {
+            // Reuse the intro blink so the prompt feels consistent.
+            if (_blinkVisible)
+            {
+                float hintSize = _baseTextSize * 0.7f;
+                _text.DrawShadowed(_spriteBatch, "PRESS ANY KEY TO RETURN", _screenWidth / 2f,
+                    _screenHeight - hintSize * 3f, hintSize,
+                    WithAlpha(new Color(150, 150, 150), alpha), true);
+            }
+        }
+    }
+
     private string BuildVolumeBar()
     {
         int filled = (int)MathF.Round(_masterVolume * 10f);
@@ -710,6 +1070,7 @@ public class Game1 : Game
 
     protected override void UnloadContent()
     {
+        _video?.Dispose();
         _musicInstance?.Stop();
         _musicInstance?.Dispose();
         _musicSound?.Dispose();

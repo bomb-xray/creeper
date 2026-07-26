@@ -39,3 +39,7 @@ Thumbs.db
 
 # Auto-generated asset conversions
 assets/*_converted.*
+
+# Runtime-generated game data
+saves/
+assets/cache/
