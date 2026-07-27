@@ -1,101 +1,119 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using System;
-using System.Collections.Generic;
-using System.IO;
 
 namespace CreeperGame;
 
-/// <summary>Which way the character is facing. Left reuses the side view mirrored.</summary>
-public enum Direction
+/// <summary>What the character is currently doing. Drives the animation.</summary>
+public enum CharacterState
 {
-    Down,
-    Up,
-    Left,
-    Right
+    Idle,
+    Walk,
+    Crouch,
+    Jump,
+    Fall,
+    Dash
 }
 
 /// <summary>
-/// A character built from three turnaround views (front, back, side).
+/// The player character in the side-scrolling world.
 ///
-/// Three static drawings cannot be skeletally rigged, so movement is sold with
-/// procedural motion instead: a vertical bob, a slight lean into the direction of
-/// travel and a squash on footfall. That is enough to read as walking, and the
-/// same code keeps working later if real frame strips are dropped in.
+/// The art is a single side view, so there are no hand-drawn walk frames. The
+/// motion is produced procedurally instead: a bob and lean while walking, a
+/// stretch on take-off, a squash on landing, a crouch scale, and a streak of
+/// afterimages during a dash. That reads as animation without needing a sprite
+/// sheet, and it can be swapped for real frames later without touching the
+/// movement code.
 /// </summary>
 public class Character : IDisposable
 {
-    /// <summary>File name stems accepted for each view, in priority order.</summary>
-    private static readonly Dictionary<string, string[]> ViewNames = new()
-    {
-        ["front"] = new[] { "char_front", "character_front", "player_front", "front", "char_down" },
-        ["back"] = new[] { "char_back", "character_back", "player_back", "back", "char_up" },
-        ["side"] = new[] { "char_side", "character_side", "player_side", "side", "char_right" }
-    };
+    // ---- tuning ------------------------------------------------------------
 
-    private readonly Texture2D? _front;
-    private readonly Texture2D? _back;
+    private const float WalkSpeed = 320f;
+    private const float JumpVelocity = -880f;
+    private const float Gravity = 2300f;
+    private const float MaxFallSpeed = 1400f;
+
+    private const float DashSpeed = 1150f;
+    private const float DashDuration = 0.18f;
+    private const float DashCooldown = 0.55f;
+
+    /// <summary>Extra gravity while falling, so jumps feel snappy rather than floaty.</summary>
+    private const float FallGravityMultiplier = 1.5f;
+
+    /// <summary>Grace period after walking off a ledge where a jump still works.</summary>
+    private const float CoyoteTime = 0.10f;
+
+    /// <summary>A jump pressed this long before landing still fires on touchdown.</summary>
+    private const float JumpBufferTime = 0.12f;
+
+    // ---- art ---------------------------------------------------------------
+
     private readonly Texture2D? _side;
+    private readonly Texture2D? _front;
     private readonly Texture2D _shadow;
 
-    /// <summary>Height the character is drawn at, in screen pixels.</summary>
-    public float DisplayHeight { get; set; } = 200f;
+    /// <summary>
+    /// The side view is drawn facing left, so it is mirrored when walking right.
+    /// </summary>
+    private const bool SideArtFacesLeft = true;
 
-    /// <summary>Position of the character's feet in world/screen space.</summary>
+    // ---- state -------------------------------------------------------------
+
+    /// <summary>Feet position in world space.</summary>
     public Vector2 Position;
 
-    public Direction Facing { get; private set; } = Direction.Down;
+    public Vector2 Velocity;
 
-    /// <summary>Pixels per second.</summary>
-    public float Speed { get; set; } = 260f;
+    /// <summary>Height the character is drawn at, in screen pixels.</summary>
+    public float DisplayHeight { get; set; } = 220f;
 
-    /// <summary>True when at least one view loaded, so the caller can warn the player.</summary>
-    public bool HasArt => _front != null || _back != null || _side != null;
+    /// <summary>-1 facing left, 1 facing right.</summary>
+    public int FacingSign { get; private set; } = 1;
 
-    /// <summary>Names of the views that failed to load, for the on-screen hint.</summary>
-    public List<string> MissingViews { get; } = new List<string>();
+    public CharacterState State { get; private set; } = CharacterState.Idle;
 
+    public bool OnGround { get; private set; } = true;
+
+    public bool IsCrouching { get; private set; }
+
+    public bool HasArt => _side != null || _front != null;
+
+    /// <summary>Ground height in world space; set by the scene each frame.</summary>
+    public float GroundY { get; set; }
+
+    // Timers
     private float _walkCycle;
-    private bool _moving;
+    private float _coyoteTimer;
+    private float _jumpBufferTimer;
+    private float _dashTimer;
+    private float _dashCooldownTimer;
+    private int _dashDirection = 1;
+
+    // Squash and stretch, eased back to 1 each frame.
+    private float _squash = 1f;
+
+    /// <summary>Recent positions used to draw the dash trail.</summary>
+    private readonly Vector2[] _trail = new Vector2[6];
+    private readonly float[] _trailAge = new float[6];
+    private int _trailIndex;
+    private float _trailTimer;
 
     public Character(GraphicsDevice device, string assetDir)
     {
-        _front = LoadView(device, assetDir, "front");
-        _back = LoadView(device, assetDir, "back");
-        _side = LoadView(device, assetDir, "side");
+        // Character art is authored with real alpha, but run it through the
+        // colour key anyway in case a magenta-keyed version is dropped in.
+        _side = TextureLoader.LoadAny(device, assetDir,
+            new[] { "side", "char_side", "character_side", "player_side" }, true);
 
-        // A soft blob under the feet grounds the sprite; without it the character
-        // looks like it is floating over the background.
+        _front = TextureLoader.LoadAny(device, assetDir,
+            new[] { "front", "char_front", "character_front", "player_front" }, true);
+
         _shadow = CreateShadowTexture(device, 64);
+
+        for (int i = 0; i < _trailAge.Length; i++) _trailAge[i] = float.MaxValue;
     }
 
-    private Texture2D? LoadView(GraphicsDevice device, string assetDir, string view)
-    {
-        foreach (string stem in ViewNames[view])
-        {
-            // Reuse the converter so odd JPEGs and the like are handled too.
-            string? path = ImageConverter.EnsureLoadableImage(assetDir, stem);
-            if (path == null || !File.Exists(path)) continue;
-
-            try
-            {
-                using var stream = File.OpenRead(path);
-                var texture = Texture2D.FromStream(device, stream);
-                Console.WriteLine($"Character {view}: {path} ({texture.Width}x{texture.Height})");
-                return texture;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Character {view} failed to load from {path}: {ex.Message}");
-            }
-        }
-
-        Console.WriteLine($"Character {view}: not found (tried {string.Join(", ", ViewNames[view])})");
-        MissingViews.Add(view);
-        return null;
-    }
-
-    /// <summary>Builds a radial-gradient blob used as a drop shadow.</summary>
     private static Texture2D CreateShadowTexture(GraphicsDevice device, int size)
     {
         var pixels = new Color[size * size];
@@ -109,11 +127,10 @@ public class Character : IDisposable
                 float dy = (y - radius + 0.5f) / radius;
                 float distance = MathF.Sqrt(dx * dx + dy * dy);
 
-                // Fades to nothing at the rim.
                 float strength = MathHelper.Clamp(1f - distance, 0f, 1f);
                 strength *= strength;
 
-                pixels[y * size + x] = new Color(0, 0, 0, (byte)(strength * 140));
+                pixels[y * size + x] = new Color(0, 0, 0, (byte)(strength * 150));
             }
         }
 
@@ -122,111 +139,281 @@ public class Character : IDisposable
         return texture;
     }
 
-    /// <summary>
-    /// Moves the character. <paramref name="input"/> is the raw direction from the
-    /// keyboard; it is normalised so diagonals are not faster.
-    /// </summary>
-    public void Update(float dt, Vector2 input, Rectangle bounds)
+    /// <summary>Everything the character reads from the player in one frame.</summary>
+    public struct Input
     {
-        _moving = input != Vector2.Zero;
+        /// <summary>-1, 0 or 1.</summary>
+        public int Move;
+        public bool JumpPressed;
+        public bool JumpHeld;
+        public bool CrouchHeld;
+        public bool DashPressed;
+    }
 
-        if (_moving)
+    public void Update(float dt, Input input, float leftBound, float rightBound)
+    {
+        UpdateTimers(dt, input);
+
+        if (_dashTimer > 0f)
         {
-            input.Normalize();
-            Position += input * Speed * dt;
-
-            // Horizontal input wins when moving diagonally, which keeps the side
-            // view on screen during diagonal walks (it reads better than the back).
-            if (MathF.Abs(input.X) > 0.35f)
-            {
-                Facing = input.X > 0 ? Direction.Right : Direction.Left;
-            }
-            else if (input.Y > 0)
-            {
-                Facing = Direction.Down;
-            }
-            else if (input.Y < 0)
-            {
-                Facing = Direction.Up;
-            }
-
-            _walkCycle += dt * 9f;
+            UpdateDash(dt);
         }
         else
         {
-            // Idle breathing, much slower than the walk.
-            _walkCycle += dt * 1.8f;
+            UpdateNormalMovement(dt, input);
         }
 
-        // Keep the feet inside the playable area.
-        Position.X = MathHelper.Clamp(Position.X, bounds.Left, bounds.Right);
-        Position.Y = MathHelper.Clamp(Position.Y, bounds.Top, bounds.Bottom);
+        ApplyGravity(dt, input);
+        MoveAndCollide(dt, leftBound, rightBound);
+        UpdateState(input);
+        UpdateAnimation(dt);
     }
 
-    /// <summary>Picks the texture for the current facing, and whether to mirror it.</summary>
-    private (Texture2D? texture, bool flip) CurrentView()
+    private void UpdateTimers(float dt, Input input)
     {
-        return Facing switch
+        _coyoteTimer = OnGround ? CoyoteTime : MathF.Max(0f, _coyoteTimer - dt);
+
+        _jumpBufferTimer = input.JumpPressed
+            ? JumpBufferTime
+            : MathF.Max(0f, _jumpBufferTimer - dt);
+
+        _dashTimer = MathF.Max(0f, _dashTimer - dt);
+        _dashCooldownTimer = MathF.Max(0f, _dashCooldownTimer - dt);
+    }
+
+    private void UpdateDash(float dt)
+    {
+        Velocity.X = _dashDirection * DashSpeed;
+
+        // A dash is weightless, which makes it useful for crossing gaps.
+        Velocity.Y = 0f;
+
+        _trailTimer -= dt;
+        if (_trailTimer <= 0f)
         {
-            Direction.Up => (_back ?? _front, false),
-            Direction.Left => (_side ?? _front, true),   // side view mirrored
-            Direction.Right => (_side ?? _front, false),
-            _ => (_front ?? _side, false)
-        };
+            _trailTimer = 0.02f;
+            _trail[_trailIndex] = Position;
+            _trailAge[_trailIndex] = 0f;
+            _trailIndex = (_trailIndex + 1) % _trail.Length;
+        }
     }
 
-    public void Draw(SpriteBatch spriteBatch)
+    private void UpdateNormalMovement(float dt, Input input)
     {
-        (Texture2D? texture, bool flip) = CurrentView();
+        IsCrouching = input.CrouchHeld && OnGround;
+
+        // Start a dash.
+        if (input.DashPressed && _dashCooldownTimer <= 0f)
+        {
+            _dashDirection = input.Move != 0 ? input.Move : FacingSign;
+            FacingSign = _dashDirection;
+            _dashTimer = DashDuration;
+            _dashCooldownTimer = DashCooldown + DashDuration;
+            _squash = 0.82f; // stretched thin along the dash
+            return;
+        }
+
+        // Crouching pins the character in place; standing lets them walk.
+        float targetSpeed = IsCrouching ? 0f : input.Move * WalkSpeed;
+
+        // Ground movement is crisp, air movement has some drift.
+        float acceleration = OnGround ? 18f : 8f;
+        Velocity.X = MathHelper.Lerp(Velocity.X, targetSpeed, MathF.Min(1f, acceleration * dt));
+
+        if (input.Move != 0 && !IsCrouching) FacingSign = input.Move;
+
+        // Jump, honouring both the coyote window and the input buffer.
+        if (_jumpBufferTimer > 0f && _coyoteTimer > 0f && !IsCrouching)
+        {
+            Velocity.Y = JumpVelocity;
+            OnGround = false;
+            _coyoteTimer = 0f;
+            _jumpBufferTimer = 0f;
+            _squash = 1.18f; // stretch upward on take-off
+        }
+    }
+
+    private void ApplyGravity(float dt, Input input)
+    {
+        if (_dashTimer > 0f) return;
+
+        float gravity = Gravity;
+
+        // Releasing jump early cuts the arc short, giving variable jump height.
+        if (Velocity.Y < 0f && !input.JumpHeld) gravity *= 2.2f;
+        else if (Velocity.Y > 0f) gravity *= FallGravityMultiplier;
+
+        Velocity.Y = MathF.Min(MaxFallSpeed, Velocity.Y + gravity * dt);
+    }
+
+    private void MoveAndCollide(float dt, float leftBound, float rightBound)
+    {
+        Position += Velocity * dt;
+
+        if (Position.Y >= GroundY)
+        {
+            if (!OnGround && Velocity.Y > 400f)
+            {
+                // Heavier landings squash more.
+                _squash = MathHelper.Clamp(1f - Velocity.Y / 6000f, 0.78f, 0.97f);
+            }
+
+            Position.Y = GroundY;
+            Velocity.Y = 0f;
+            OnGround = true;
+        }
+        else
+        {
+            OnGround = false;
+        }
+
+        Position.X = MathHelper.Clamp(Position.X, leftBound, rightBound);
+    }
+
+    private void UpdateState(Input input)
+    {
+        if (_dashTimer > 0f) State = CharacterState.Dash;
+        else if (!OnGround) State = Velocity.Y < 0f ? CharacterState.Jump : CharacterState.Fall;
+        else if (IsCrouching) State = CharacterState.Crouch;
+        else if (MathF.Abs(Velocity.X) > 25f) State = CharacterState.Walk;
+        else State = CharacterState.Idle;
+    }
+
+    private void UpdateAnimation(float dt)
+    {
+        // The walk cycle is driven by actual speed, so it never slides.
+        float speedRatio = MathF.Abs(Velocity.X) / WalkSpeed;
+
+        _walkCycle += State switch
+        {
+            CharacterState.Walk => dt * 10f * MathF.Max(0.4f, speedRatio),
+            CharacterState.Crouch => dt * 2.5f,
+            _ => dt * 2f
+        };
+
+        // Ease squash and stretch back to neutral.
+        _squash = MathHelper.Lerp(_squash, 1f, MathF.Min(1f, 9f * dt));
+
+        for (int i = 0; i < _trailAge.Length; i++)
+        {
+            if (_trailAge[i] < float.MaxValue) _trailAge[i] += dt;
+        }
+    }
+
+    public void Draw(SpriteBatch spriteBatch, float cameraX)
+    {
+        Texture2D? texture = _side ?? _front;
         if (texture == null) return;
 
-        float scale = DisplayHeight / texture.Height;
-        float width = texture.Width * scale;
+        float screenX = Position.X - cameraX;
 
-        // Procedural motion: bob up and down, and squash slightly on footfall.
+        // ---- procedural motion ----
+
         float bobPhase = MathF.Sin(_walkCycle);
-        float amplitude = _moving ? DisplayHeight * 0.022f : DisplayHeight * 0.006f;
-        float bob = -MathF.Abs(bobPhase) * amplitude;
+        float bob = 0f;
+        float lean = 0f;
+        float scaleX = 1f;
+        float scaleY = 1f;
 
-        float squash = _moving ? 1f - MathF.Abs(bobPhase) * 0.03f : 1f;
-        float lean = _moving ? bobPhase * 0.02f : 0f;
+        switch (State)
+        {
+            case CharacterState.Walk:
+                bob = -MathF.Abs(bobPhase) * DisplayHeight * 0.028f;
+                lean = bobPhase * 0.025f * FacingSign;
+                break;
 
-        float drawHeight = DisplayHeight * squash;
-        float drawWidth = width / squash; // preserve area, so the squash looks elastic
+            case CharacterState.Idle:
+                // Slow breathing so the character is never completely static.
+                bob = -MathF.Abs(bobPhase) * DisplayHeight * 0.006f;
+                scaleY = 1f + bobPhase * 0.008f;
+                break;
 
-        // Shadow first, sized to the sprite and tightening as the character rises.
-        float shadowWidth = width * 0.55f;
-        float shadowHeight = shadowWidth * 0.32f;
-        float shadowShrink = 1f - MathF.Abs(bob) / MathF.Max(1f, amplitude) * 0.12f;
+            case CharacterState.Crouch:
+                scaleY = 0.62f;
+                scaleX = 1.14f;
+                break;
+
+            case CharacterState.Jump:
+                scaleY = 1.10f;
+                scaleX = 0.93f;
+                lean = 0.05f * FacingSign;
+                break;
+
+            case CharacterState.Fall:
+                scaleY = 1.05f;
+                scaleX = 0.97f;
+                lean = -0.04f * FacingSign;
+                break;
+
+            case CharacterState.Dash:
+                // Stretched along the direction of travel.
+                scaleX = 1.22f;
+                scaleY = 0.86f;
+                lean = 0.14f * FacingSign;
+                break;
+        }
+
+        scaleY *= _squash;
+        scaleX /= MathF.Max(0.4f, _squash); // conserve volume
+
+        float drawHeight = DisplayHeight * scaleY;
+        float drawWidth = texture.Width * (DisplayHeight / texture.Height) * scaleX;
+
+        // Mirror when the art's authored direction disagrees with the facing.
+        bool faceRight = FacingSign > 0;
+        bool flip = SideArtFacesLeft ? faceRight : !faceRight;
+        SpriteEffects effects = flip ? SpriteEffects.FlipHorizontally : SpriteEffects.None;
+
+        var origin = new Vector2(texture.Width / 2f, texture.Height);
+        var scale = new Vector2(drawWidth / texture.Width, drawHeight / texture.Height);
+
+        // ---- dash trail ----
+
+        if (State == CharacterState.Dash || _dashTimer > 0f)
+        {
+            for (int i = 0; i < _trail.Length; i++)
+            {
+                float age = _trailAge[i];
+                if (age > 0.22f) continue;
+
+                float fade = 1f - age / 0.22f;
+                var ghostColour = new Color(150, 170, 255) * (fade * 0.35f);
+
+                spriteBatch.Draw(texture,
+                    new Vector2(_trail[i].X - cameraX, _trail[i].Y),
+                    null, ghostColour, lean, origin, scale, effects, 0f);
+            }
+        }
+
+        // ---- shadow ----
+
+        // Shrinks and fades as the character rises, selling the height.
+        float airHeight = MathHelper.Clamp((GroundY - Position.Y) / 260f, 0f, 1f);
+        float shadowScale = 1f - airHeight * 0.45f;
+        float shadowAlpha = 1f - airHeight * 0.55f;
+
+        float shadowWidth = drawWidth * 0.5f * shadowScale;
+        float shadowHeight = shadowWidth * 0.28f;
 
         spriteBatch.Draw(_shadow,
             new Rectangle(
-                (int)(Position.X - shadowWidth * shadowShrink / 2f),
-                (int)(Position.Y - shadowHeight * shadowShrink / 2f),
-                (int)(shadowWidth * shadowShrink),
-                (int)(shadowHeight * shadowShrink)),
-            Color.White);
+                (int)(screenX - shadowWidth / 2f),
+                (int)(GroundY - shadowHeight / 2f),
+                (int)shadowWidth,
+                (int)shadowHeight),
+            Color.White * shadowAlpha);
 
-        // Origin at the bottom centre so the feet sit on Position.
-        var origin = new Vector2(texture.Width / 2f, texture.Height);
+        // ---- character ----
 
-        spriteBatch.Draw(
-            texture,
-            new Vector2(Position.X, Position.Y + bob),
-            null,
-            Color.White,
-            lean,
-            origin,
-            new Vector2(drawWidth / texture.Width, drawHeight / texture.Height),
-            flip ? SpriteEffects.FlipHorizontally : SpriteEffects.None,
-            0f);
+        spriteBatch.Draw(texture,
+            new Vector2(screenX, Position.Y + bob),
+            null, Color.White, lean, origin, scale, effects, 0f);
     }
 
     public void Dispose()
     {
-        _front?.Dispose();
-        _back?.Dispose();
         _side?.Dispose();
+        _front?.Dispose();
         _shadow?.Dispose();
     }
 }
