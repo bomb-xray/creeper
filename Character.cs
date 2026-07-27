@@ -35,20 +35,21 @@ public class Character : IDisposable
     private const float Gravity = 2300f;
     private const float MaxFallSpeed = 1400f;
 
-    private const float DashSpeed = 1150f;
-    private const float DashDuration = 0.18f;
-    private const float DashCooldown = 0.55f;
+    // Dash tuning: a short, very fast burst that covers real ground, then a
+    // recovery window. Short and sharp reads better than long and floaty.
+    private const float DashSpeed = 1500f;
+    private const float DashDuration = 0.16f;
+    private const float DashCooldown = 0.32f;
+
+    /// <summary>Momentum kept when the dash ends, so it does not stop dead.</summary>
+    private const float DashExitSpeed = 0.35f;
 
     private const float FallGravityMultiplier = 1.5f;
     private const float CoyoteTime = 0.10f;
     private const float JumpBufferTime = 0.12f;
 
-    /// <summary>
-    /// Height of the whole knight in art pixels, used to derive the integer draw
-    /// scale from the requested on-screen height.
-    /// Legs 11 + torso 13 - 2 overlap + head 11 - 2 overlap + 3 of plume = 34.
-    /// </summary>
-    private const int ArtHeight = 34;
+    /// <summary>Height of the assembled knight in art pixels.</summary>
+    private const int ArtHeight = KnightArt.Height;
 
     // ---- sprites -----------------------------------------------------------
 
@@ -64,6 +65,7 @@ public class Character : IDisposable
     private readonly PixelSprite _legsCrouch;
     private readonly PixelSprite _legsJump;
     private readonly PixelSprite _legsFall;
+    private readonly PixelSprite _legsDash;
 
     private readonly PixelSprite _capeRest;
     private readonly PixelSprite _capeDrift;
@@ -107,8 +109,14 @@ public class Character : IDisposable
     /// <summary>Wing beat strength, spiking on take-off and decaying.</summary>
     private float _wingBeat;
 
-    private readonly Vector2[] _trail = new Vector2[5];
-    private readonly float[] _trailAge = new float[5];
+    // A dense ghost trail is the signature of the dash: several afterimages that
+    // linger and fade rather than one blurred smear.
+    private const int TrailLength = 10;
+    private const float TrailLifetime = 0.30f;
+
+    private readonly Vector2[] _trail = new Vector2[TrailLength];
+    private readonly float[] _trailAge = new float[TrailLength];
+    private readonly int[] _trailFacing = new int[TrailLength];
     private int _trailIndex;
     private float _trailTimer;
 
@@ -129,11 +137,12 @@ public class Character : IDisposable
             new PixelSprite(device, KnightArt.LegsWalk0, p),
             new PixelSprite(device, KnightArt.LegsWalk1, p),
             new PixelSprite(device, KnightArt.LegsWalk2, p),
-            new PixelSprite(device, KnightArt.LegsWalk1, p)
+            new PixelSprite(device, KnightArt.LegsWalk3, p)
         };
         _legsCrouch = new PixelSprite(device, KnightArt.LegsCrouch, p);
         _legsJump = new PixelSprite(device, KnightArt.LegsJump, p);
         _legsFall = new PixelSprite(device, KnightArt.LegsFall, p);
+        _legsDash = new PixelSprite(device, KnightArt.LegsDash, p);
 
         _capeRest = new PixelSprite(device, KnightArt.CapeRest, p);
         _capeDrift = new PixelSprite(device, KnightArt.CapeDrift, p);
@@ -214,15 +223,29 @@ public class Character : IDisposable
 
     private void UpdateDash(float dt)
     {
-        Velocity.X = _dashDirection * DashSpeed;
+        // Eases from full speed down over the burst, which feels like a lunge
+        // rather than a constant-velocity slide.
+        float progress = 1f - _dashTimer / DashDuration;
+        float speedCurve = MathHelper.Lerp(1f, 0.55f, progress * progress);
+
+        Velocity.X = _dashDirection * DashSpeed * speedCurve;
+
+        // Weightless while dashing, which is what makes it useful over gaps.
         Velocity.Y = 0f;
+
+        // Hand back some momentum on the final frame.
+        if (_dashTimer <= dt)
+        {
+            Velocity.X = _dashDirection * DashSpeed * DashExitSpeed;
+        }
 
         _trailTimer -= dt;
         if (_trailTimer <= 0f)
         {
-            _trailTimer = 0.025f;
+            _trailTimer = 0.015f;
             _trail[_trailIndex] = Position;
             _trailAge[_trailIndex] = 0f;
+            _trailFacing[_trailIndex] = FacingSign;
             _trailIndex = (_trailIndex + 1) % _trail.Length;
         }
     }
@@ -319,7 +342,7 @@ public class Character : IDisposable
         CharacterState.Crouch => _legsCrouch,
         CharacterState.Jump => _legsJump,
         CharacterState.Fall => _legsFall,
-        CharacterState.Dash => _legsJump,
+        CharacterState.Dash => _legsDash,
         _ => _legsIdle
     };
 
@@ -360,20 +383,31 @@ public class Character : IDisposable
 
         // ---- dash trail ----
 
-        if (_dashTimer > 0f)
-        {
-            for (int i = 0; i < _trail.Length; i++)
-            {
-                float age = _trailAge[i];
-                if (age > 0.20f) continue;
+        // Ghosts outlive the dash itself, so they keep streaming after the burst.
+        int savedFacing = FacingSign;
 
-                float fade = 1f - age / 0.20f;
-                DrawKnight(spriteBatch,
-                    (int)MathF.Round(_trail[i].X - cameraX),
-                    (int)MathF.Round(_trail[i].Y),
-                    scale, new Color(140, 165, 255) * (fade * 0.35f));
-            }
+        for (int i = 0; i < _trail.Length; i++)
+        {
+            float age = _trailAge[i];
+            if (age > TrailLifetime) continue;
+
+            float fade = 1f - age / TrailLifetime;
+
+            // Cools from near-white to a deep blue as it fades.
+            Color ghost = Color.Lerp(
+                new Color(120, 140, 220),
+                new Color(230, 240, 255),
+                fade);
+
+            FacingSign = _trailFacing[i];
+
+            DrawKnight(spriteBatch,
+                (int)MathF.Round(_trail[i].X - cameraX),
+                (int)MathF.Round(_trail[i].Y),
+                scale, ghost * (fade * fade * 0.55f));
         }
+
+        FacingSign = savedFacing;
 
         // ---- shadow ----
 
@@ -398,14 +432,19 @@ public class Character : IDisposable
     }
 
     /// <summary>
-    /// Lays out every part relative to the feet. All offsets are in art pixels
-    /// and multiplied by the scale, which keeps the pixel grid intact.
+    /// Lays out every part relative to the feet, using the same offsets as the
+    /// design-time preview in design/art.py. All values are art pixels scaled by
+    /// a whole number, which keeps the pixel grid intact.
     /// </summary>
     private void DrawKnight(SpriteBatch spriteBatch, int footX, int footY, int scale, Color tint)
     {
         bool flip = FacingSign < 0;
 
-        // A one-pixel bob, applied in art pixels so it stays on the grid.
+        PixelSprite legs = CurrentLegs();
+        PixelSprite cape = CurrentCape();
+        PixelSprite wing = CurrentWing();
+
+        // A single-pixel bob keeps the walk and idle alive without leaving the grid.
         int bob = State switch
         {
             CharacterState.Walk => MathF.Sin(_walkCycle * MathF.PI / 2f) > 0.5f ? -1 : 0,
@@ -413,52 +452,57 @@ public class Character : IDisposable
             _ => 0
         };
 
-        // Crouching drops the whole upper body.
-        int crouchDrop = State == CharacterState.Crouch ? 5 : 0;
+        // Per-state adjustments, mirroring the preview poses.
+        int bodyDrop = 0;    // lowers the upper body
+        int swordLift = 0;   // raises the blade
+        int lunge = 0;       // pushes the upper body forward
 
-        PixelSprite legs = CurrentLegs();
-        PixelSprite cape = CurrentCape();
-        PixelSprite wing = CurrentWing();
+        switch (State)
+        {
+            case CharacterState.Crouch:
+                bodyDrop = 8;
+                swordLift = -4;
+                break;
+            case CharacterState.Jump:
+                swordLift = 4;
+                break;
+            case CharacterState.Dash:
+                // Low forward lunge with the blade tucked back.
+                bodyDrop = 6;
+                swordLift = -6;
+                lunge = 3;
+                break;
+        }
 
-        // Vertical layout, measured up from the feet.
-        int legsTop = -legs.Height;
-        int torsoTop = legsTop - _torso.Height + 2 + crouchDrop;
-        int headTop = torsoTop - _head.Height + 2;
+        // Vertical stack measured up from the feet, matching art.py's compose().
+        int legsY = -legs.Height;
+        int torsoY = legsY - 20 + 4 + bodyDrop;      // torso art is 20 tall
+        int headY = torsoY - 14 + 3;                 // head art is 14 tall
 
-        // Helper that converts art-space offsets into screen pixels, mirroring
-        // horizontally when the knight faces left.
-        void Blit(PixelSprite sprite, int offsetX, int offsetY)
+        int legsX = -10;
+        int torsoX = -8 + lunge;
+        int headX = -6 + lunge;
+
+        // Converts art-space offsets to screen pixels, mirroring when facing left.
+        void Blit(PixelSprite sprite, int offsetX, int offsetY, Color colour)
         {
             int x = flip
                 ? footX - (offsetX + sprite.Width) * scale
                 : footX + offsetX * scale;
 
-            sprite.Draw(spriteBatch, x, footY + (offsetY + bob) * scale, scale, flip, tint);
+            sprite.Draw(spriteBatch, x, footY + (offsetY + bob) * scale, scale, flip, colour);
         }
 
-        // ---- back to front ----
-
-        // Far wing, behind everything, offset back and up.
-        Blit(wing, -13, torsoTop - 3);
-
-        // Cape hangs from the shoulders.
-        Blit(cape, -7, torsoTop + 2);
-
-        // Far arm sits behind the torso.
-        Blit(_armFar, -1, torsoTop + 3);
-
-        Blit(legs, -7, legsTop);
-        Blit(_torso, -6, torsoTop);
-
-        // Head, with the plume angled back over it.
-        Blit(_head, -5, headTop);
-        Blit(_plume, -9, headTop - 3);
-
-        // Near arm and the blade it holds, in front of the torso.
-        Blit(_armNear, 2, torsoTop + 3);
-
-        // The sword is held point-up, hilt at the gauntlet.
-        Blit(_sword, 4, torsoTop - 9);
+        // Back to front.
+        Blit(wing, torsoX - 11, torsoY - 6, tint);
+        Blit(cape, torsoX - 8, torsoY + 2, tint);
+        Blit(_armFar, torsoX + 1, torsoY + 3, tint);
+        Blit(legs, legsX, legsY, tint);
+        Blit(_torso, torsoX, torsoY, tint);
+        Blit(_head, headX, headY, tint);
+        Blit(_plume, headX - 7, headY - 2, tint);
+        Blit(_armNear, torsoX + 9, torsoY + 4, tint);
+        Blit(_sword, torsoX + 13, torsoY - 14 - swordLift, tint);
     }
 
     public void Dispose()
@@ -478,6 +522,7 @@ public class Character : IDisposable
         _legsCrouch?.Dispose();
         _legsJump?.Dispose();
         _legsFall?.Dispose();
+        _legsDash?.Dispose();
 
         _capeRest?.Dispose();
         _capeDrift?.Dispose();
