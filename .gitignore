@@ -43,3 +43,4 @@ assets/*_converted.*
 # Runtime-generated game data
 saves/
 assets/cache/
+.scratch/

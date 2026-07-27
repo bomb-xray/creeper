@@ -14,7 +14,7 @@ namespace CreeperGame.Art;
 /// </summary>
 public sealed class SheetInspector
 {
-    private readonly KnightSheet _sheet;
+    private readonly CharacterSheet _sheet;
     private readonly Texture2D _pixel;
 
     private int _selected;
@@ -25,7 +25,7 @@ public sealed class SheetInspector
 
     private static readonly string[] ModeNames = { "IDLE", "WALK" };
 
-    public SheetInspector(KnightSheet sheet, Texture2D pixel)
+    public SheetInspector(CharacterSheet sheet, Texture2D pixel)
     {
         _sheet = sheet;
         _pixel = pixel;
@@ -112,7 +112,7 @@ public sealed class SheetInspector
 
         spriteBatch.Draw(_sheet.Texture, detailRect, _sheet.Source(_selected), Color.White);
 
-        text.DrawShadowed(spriteBatch, $"FRAME {_selected}  {FrameName(_selected)}",
+        text.DrawShadowed(spriteBatch, $"FRAME {_selected}  {PenitentPoses.FrameName(_selected)}",
             detailX + detailW / 2f, detailTop + detailH + small * 1.4f, small,
             new Color(200, 200, 210), true);
 
@@ -127,8 +127,8 @@ public sealed class SheetInspector
             new Color(90, 80, 70));
 
         int liveFrame = _previewMode == 0
-            ? KnightPoses.IdleStart + (int)(_playTime * 6f) % KnightPoses.IdleFrames
-            : KnightPoses.WalkStart + (int)(_playTime * 12f) % KnightPoses.WalkFrames;
+            ? PenitentPoses.IdleStart + (int)(_playTime * 6f) % PenitentPoses.IdleFrames
+            : PenitentPoses.WalkStart + (int)(_playTime * 12f) % PenitentPoses.WalkFrames;
 
         spriteBatch.Draw(_sheet.Texture, liveRect, _sheet.Source(liveFrame), Color.White);
 
@@ -149,16 +149,6 @@ public sealed class SheetInspector
             "LEFT / RIGHT - FRAME     TAB - SWITCH LOOP     F2 OR ESC - BACK",
             screenWidth / 2f, screenHeight - small * 2f, small,
             new Color(170, 170, 180), true);
-    }
-
-    private static string FrameName(int index)
-    {
-        if (index < KnightPoses.WalkStart) return $"IDLE {index - KnightPoses.IdleStart}";
-        if (index < KnightPoses.CrouchFrame) return $"WALK {index - KnightPoses.WalkStart}";
-        if (index == KnightPoses.CrouchFrame) return "CROUCH";
-        if (index == KnightPoses.JumpFrame) return "JUMP";
-        if (index == KnightPoses.FallFrame) return "FALL";
-        return "DASH";
     }
 
     private void DrawBorder(SpriteBatch spriteBatch, Rectangle rect, Color colour)

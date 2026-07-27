@@ -53,12 +53,12 @@ public class Character : IDisposable
     /// Height of the knight in art pixels. Frames are drawn at whole-number
     /// multiples of this, so the pixel grid is never broken.
     /// </summary>
-    private const int ArtHeight = 100;
+    private const int ArtHeight = PenitentRig.FigureHeight;
 
-    private readonly KnightSheet _sheet;
+    private readonly CharacterSheet _sheet;
 
     /// <summary>The baked frames, exposed so the inspector can display them.</summary>
-    public KnightSheet Sheet => _sheet;
+    public CharacterSheet Sheet => _sheet;
     private readonly Texture2D _shadow;
 
     // ---- state -------------------------------------------------------------
@@ -104,7 +104,7 @@ public class Character : IDisposable
     public Character(GraphicsDevice device, string assetDir)
     {
         // Every frame is rasterised and shaded here, once, at startup.
-        _sheet = new KnightSheet(device);
+        _sheet = new CharacterSheet(device);
         _shadow = CreateShadowTexture(device, 64);
 
         for (int i = 0; i < _trailAge.Length; i++) _trailAge[i] = float.MaxValue;
@@ -196,7 +196,7 @@ public class Character : IDisposable
             _trail[_trailIndex] = Position;
             _trailAge[_trailIndex] = 0f;
             _trailFacing[_trailIndex] = FacingSign;
-            _trailFrame[_trailIndex] = KnightPoses.DashFrame;
+            _trailFrame[_trailIndex] = PenitentPoses.DashFrame;
             _trailIndex = (_trailIndex + 1) % _trail.Length;
         }
     }
@@ -291,19 +291,19 @@ public class Character : IDisposable
         switch (State)
         {
             case CharacterState.Walk:
-                return KnightPoses.WalkStart + Wrap((int)_animTime, KnightPoses.WalkFrames);
+                return PenitentPoses.WalkStart + Wrap((int)_animTime, PenitentPoses.WalkFrames);
             case CharacterState.Idle:
-                return KnightPoses.IdleStart + Wrap((int)_animTime, KnightPoses.IdleFrames);
+                return PenitentPoses.IdleStart + Wrap((int)_animTime, PenitentPoses.IdleFrames);
             case CharacterState.Crouch:
-                return KnightPoses.CrouchFrame;
+                return PenitentPoses.CrouchFrame;
             case CharacterState.Jump:
-                return KnightPoses.JumpFrame;
+                return PenitentPoses.JumpFrame;
             case CharacterState.Fall:
-                return KnightPoses.FallFrame;
+                return PenitentPoses.FallFrame;
             case CharacterState.Dash:
-                return KnightPoses.DashFrame;
+                return PenitentPoses.DashFrame;
             default:
-                return KnightPoses.IdleStart;
+                return PenitentPoses.IdleStart;
         }
     }
 
