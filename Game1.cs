@@ -767,51 +767,51 @@ public class Game1 : Game
 
         float hintSize = _baseTextSize * 0.62f;
 
-        // Report exactly what was searched and what was there, which is far more
-        // useful than a generic "not found".
+        // Report what is missing without burying the scene: a compact panel in
+        // the top-left, so the artwork that did load stays visible.
         if (_scene.MissingArt.Count > 0)
         {
-            float y = _screenHeight * 0.10f;
+            float pad = _baseTextSize * 0.5f;
+            float lineStep = hintSize * 1.35f;
+            float y = pad;
 
-            _text.DrawShadowed(_spriteBatch, "MISSING ART",
-                _screenWidth / 2f, y, _baseTextSize * 1.1f,
-                new Color(220, 40, 40), true);
-
-            y += _baseTextSize * 1.6f;
-            _text.DrawShadowed(_spriteBatch,
-                "MISSING: " + string.Join("  ", _scene.MissingArt).ToUpperInvariant(),
-                _screenWidth / 2f, y, hintSize, new Color(230, 170, 90), true);
-
-            y += _baseTextSize * 1.5f;
-            _text.DrawShadowed(_spriteBatch, "LOOKED IN:",
-                _screenWidth / 2f, y, hintSize * 0.9f, new Color(140, 140, 140), true);
-
-            y += _baseTextSize;
-            _text.DrawShadowed(_spriteBatch, _scene.AssetPath,
-                _screenWidth / 2f, y, hintSize * 0.9f, new Color(180, 180, 180), true);
-
-            y += _baseTextSize * 1.5f;
-            _text.DrawShadowed(_spriteBatch, "IMAGES FOUND THERE:",
-                _screenWidth / 2f, y, hintSize * 0.9f, new Color(140, 140, 140), true);
-
-            y += _baseTextSize;
-            string found = _scene.FoundFiles.Count > 0
-                ? string.Join("  ", _scene.FoundFiles)
-                : "(NONE)";
-
-            // Wrap the list so a long folder listing stays on screen.
-            foreach (string line in WrapText(found, 58))
+            var lines = new System.Collections.Generic.List<string>
             {
-                _text.DrawShadowed(_spriteBatch, line, _screenWidth / 2f, y,
-                    hintSize * 0.9f, new Color(180, 180, 180), true);
-                y += _baseTextSize;
+                "MISSING: " + string.Join("  ", _scene.MissingArt).ToUpperInvariant()
+            };
+
+            lines.AddRange(WrapText("FOUND: " + (_scene.FoundFiles.Count > 0
+                ? string.Join("  ", _scene.FoundFiles)
+                : "(NONE)"), 52));
+
+            // Dim plate so the text stays legible over a bright sky.
+            float plateHeight = lines.Count * lineStep + pad;
+            _spriteBatch.Draw(_pixel,
+                new Rectangle(0, 0, (int)(_screenWidth * 0.62f), (int)plateHeight),
+                new Color(0, 0, 0, 170));
+
+            _text.DrawShadowed(_spriteBatch, lines[0], pad, y, hintSize,
+                new Color(235, 120, 90), false);
+            y += lineStep;
+
+            for (int i = 1; i < lines.Count; i++)
+            {
+                _text.DrawShadowed(_spriteBatch, lines[i], pad, y, hintSize,
+                    new Color(170, 170, 170), false);
+                y += lineStep;
             }
         }
 
-        _text.DrawShadowed(_spriteBatch,
-            "ARROWS - MOVE    SPACE - JUMP    S - CROUCH    RIGHT SHIFT - DASH    ESC - MENU",
-            _screenWidth / 2f, _screenHeight - hintSize * 2f, hintSize,
-            new Color(210, 210, 210), true);
+        const string controls = "ARROWS - MOVE    SPACE - JUMP    S - CROUCH    RIGHT SHIFT - DASH    ESC - MENU";
+        float controlsY = _screenHeight - hintSize * 2f;
+
+        _spriteBatch.Draw(_pixel,
+            new Rectangle(0, (int)(controlsY - hintSize), _screenWidth, (int)(hintSize * 2.2f)),
+            new Color(0, 0, 0, 140));
+
+        _text.DrawShadowed(_spriteBatch, controls,
+            _screenWidth / 2f, controlsY, hintSize,
+            new Color(225, 225, 225), true);
     }
 
     /// <summary>Splits text into lines of at most maxChars, breaking on spaces.</summary>
