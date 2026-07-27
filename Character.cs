@@ -16,15 +16,15 @@ public enum CharacterState
 }
 
 /// <summary>
-/// The player: a winged knight built from a bone hierarchy rather than a sprite.
+/// The player: a winged knight assembled from hand-authored pixel parts.
 ///
-/// Everything is drawn from geometry, so poses are generated at runtime. That is
-/// the whole point of doing it this way: new actions (attacking, casting, being
-/// hit, cutscene acting) are a handful of angle curves rather than a new sheet of
-/// artwork, and the rig can be re-coloured, damaged or scaled on the fly.
+/// The art lives in <see cref="KnightArt"/> as character strings, so no image
+/// files are needed and every part can be posed independently. Animation is done
+/// the way pixel art demands: whole-pixel offsets and frame swaps, never rotation
+/// or fractional scaling, both of which would smear the pixels.
 ///
-/// The palette follows the concept art: steel plate, a deep red cape and cloth,
-/// and large pale wings.
+/// Parts are drawn back to front: far wing, cape, far arm, legs, torso, head,
+/// near arm, sword, near wing.
 /// </summary>
 public class Character : IDisposable
 {
@@ -43,52 +43,35 @@ public class Character : IDisposable
     private const float CoyoteTime = 0.10f;
     private const float JumpBufferTime = 0.12f;
 
-    // ---- proportions -------------------------------------------------------
-    // Authored in "rig units": the figure is about 100 tall, and everything is
-    // scaled to DisplayHeight when drawn. Working in fixed units keeps the maths
-    // readable and independent of resolution.
+    /// <summary>
+    /// Height of the whole knight in art pixels, used to derive the integer draw
+    /// scale from the requested on-screen height.
+    /// Legs 11 + torso 13 - 2 overlap + head 11 - 2 overlap + 3 of plume = 34.
+    /// </summary>
+    private const int ArtHeight = 34;
 
-    private const float RigHeight = 100f;
+    // ---- sprites -----------------------------------------------------------
 
-    // ---- palette -----------------------------------------------------------
+    private readonly PixelSprite _head;
+    private readonly PixelSprite _plume;
+    private readonly PixelSprite _torso;
+    private readonly PixelSprite _armNear;
+    private readonly PixelSprite _armFar;
+    private readonly PixelSprite _sword;
 
-    private static readonly Color SteelDark = new Color(88, 92, 104);
-    private static readonly Color Steel = new Color(138, 143, 158);
-    private static readonly Color SteelLight = new Color(196, 201, 214);
-    private static readonly Color CapeRed = new Color(122, 26, 32);
-    private static readonly Color CapeRedDark = new Color(78, 16, 22);
-    private static readonly Color ClothDark = new Color(46, 44, 52);
-    private static readonly Color WingPale = new Color(226, 228, 236);
-    private static readonly Color WingShade = new Color(176, 180, 196);
-    private static readonly Color BladeSteel = new Color(170, 176, 190);
+    private readonly PixelSprite _legsIdle;
+    private readonly PixelSprite[] _legsWalk;
+    private readonly PixelSprite _legsCrouch;
+    private readonly PixelSprite _legsJump;
+    private readonly PixelSprite _legsFall;
 
-    // ---- rig ---------------------------------------------------------------
+    private readonly PixelSprite _capeRest;
+    private readonly PixelSprite _capeDrift;
+    private readonly PixelSprite _capeStream;
 
-    private readonly Skeleton _skeleton;
-
-    private readonly Bone _pelvis;
-    private readonly Bone _torso;
-    private readonly Bone _chest;
-    private readonly Bone _neck;
-    private readonly Bone _head;
-    private readonly Bone _crest;
-
-    private readonly Bone _armFarUpper;
-    private readonly Bone _armFarLower;
-    private readonly Bone _armNearUpper;
-    private readonly Bone _armNearLower;
-    private readonly Bone _sword;
-
-    private readonly Bone _legFarUpper;
-    private readonly Bone _legFarLower;
-    private readonly Bone _legFarFoot;
-    private readonly Bone _legNearUpper;
-    private readonly Bone _legNearLower;
-    private readonly Bone _legNearFoot;
-
-    private readonly Bone[] _capeSegments;
-    private readonly Bone[] _wingFar;
-    private readonly Bone[] _wingNear;
+    private readonly PixelSprite _wingFolded;
+    private readonly PixelSprite _wingOpen;
+    private readonly PixelSprite _wingSpread;
 
     private readonly Texture2D _shadow;
 
@@ -97,7 +80,7 @@ public class Character : IDisposable
     public Vector2 Position;
     public Vector2 Velocity;
 
-    /// <summary>Height the character is drawn at, in screen pixels.</summary>
+    /// <summary>Requested height in screen pixels; snapped to a whole art scale.</summary>
     public float DisplayHeight { get; set; } = 220f;
 
     /// <summary>-1 facing left, 1 facing right.</summary>
@@ -107,7 +90,7 @@ public class Character : IDisposable
     public bool OnGround { get; private set; } = true;
     public bool IsCrouching { get; private set; }
 
-    /// <summary>The rig is generated, so there is always something to draw.</summary>
+    /// <summary>The art is generated, so there is always something to draw.</summary>
     public bool HasArt => true;
 
     /// <summary>Ground height in world space; set by the scene each frame.</summary>
@@ -120,145 +103,51 @@ public class Character : IDisposable
     private float _dashTimer;
     private float _dashCooldownTimer;
     private int _dashDirection = 1;
-    private float _squash = 1f;
 
-    /// <summary>Cape and wing motion lags the body, which is what sells the weight.</summary>
-    private float _capeSway;
-    private float _wingFlap;
+    /// <summary>Wing beat strength, spiking on take-off and decaying.</summary>
+    private float _wingBeat;
 
-    private readonly Vector2[] _trail = new Vector2[6];
-    private readonly float[] _trailAge = new float[6];
+    private readonly Vector2[] _trail = new Vector2[5];
+    private readonly float[] _trailAge = new float[5];
     private int _trailIndex;
     private float _trailTimer;
 
     public Character(GraphicsDevice device, string assetDir)
     {
-        _skeleton = new Skeleton(device);
+        var p = KnightArt.Palette;
 
-        // Depth ordering, back to front:
-        //   0 far wing, 1 cape, 2 far limbs, 3 body, 4 head, 5 near limbs,
-        //   6 near wing, 7 sword
-        const int dFarWing = 0, dCape = 1, dFarLimb = 2, dBody = 3;
-        const int dHead = 4, dNearLimb = 5, dNearWing = 6, dSword = 7;
+        _head = new PixelSprite(device, KnightArt.Head, p);
+        _plume = new PixelSprite(device, KnightArt.Plume, p);
+        _torso = new PixelSprite(device, KnightArt.Torso, p);
+        _armNear = new PixelSprite(device, KnightArt.ArmNear, p);
+        _armFar = new PixelSprite(device, KnightArt.ArmFar, p);
+        _sword = new PixelSprite(device, KnightArt.Sword, p);
 
-        // Angles: -PI/2 is straight up, +PI/2 straight down, 0 is to the right.
-        const float up = -MathF.PI / 2f;
-        const float down = MathF.PI / 2f;
-
-        // ---- spine ----
-
-        _pelvis = _skeleton.Add("pelvis", null, 6f, 15f, ClothDark, dBody, up);
-        _torso = _skeleton.Add("torso", _pelvis, 17f, 17f, Steel, dBody, 0f,
-            tipThickness: 20f);
-        _torso.Highlight = SteelLight;
-
-        _chest = _skeleton.Add("chest", _torso, 11f, 21f, SteelDark, dBody, 0f,
-            tipThickness: 17f);
-
-        _neck = _skeleton.Add("neck", _chest, 3.5f, 7f, ClothDark, dBody);
-        _head = _skeleton.Add("head", _neck, 13f, 12f, Steel, dHead, 0f,
-            tipThickness: 10f);
-        _head.Highlight = SteelLight;
-
-        // The red plume on the helmet.
-        _crest = _skeleton.Add("crest", _head, 9f, 6f, CapeRed, dHead, -0.25f,
-            tipThickness: 2f);
-
-        // ---- far side limbs (drawn behind the torso) ----
-
-        _armFarUpper = _skeleton.Add("armFarUpper", _chest, 13f, 8f, SteelDark, dFarLimb,
-            down * 0.82f, offset: new Vector2(0f, 2f), attachToTip: false);
-        _armFarLower = _skeleton.Add("armFarLower", _armFarUpper, 12f, 6.5f, SteelDark,
-            dFarLimb, 0.35f, tipThickness: 5.5f);
-
-        _legFarUpper = _skeleton.Add("legFarUpper", _pelvis, 16f, 10f, SteelDark, dFarLimb,
-            down, offset: new Vector2(0f, -3f), attachToTip: false);
-        _legFarLower = _skeleton.Add("legFarLower", _legFarUpper, 16f, 8f, SteelDark,
-            dFarLimb, 0f, tipThickness: 6.5f);
-        _legFarFoot = _skeleton.Add("legFarFoot", _legFarLower, 8f, 6f, ClothDark,
-            dFarLimb, -down * 0.9f);
-
-        // ---- near side limbs ----
-
-        _armNearUpper = _skeleton.Add("armNearUpper", _chest, 13f, 9f, Steel, dNearLimb,
-            down * 0.78f, offset: new Vector2(0f, 2f), attachToTip: false);
-        _armNearUpper.Highlight = SteelLight;
-
-        _armNearLower = _skeleton.Add("armNearLower", _armNearUpper, 12f, 7f, Steel,
-            dNearLimb, 0.30f, tipThickness: 6f);
-
-        // Held out in front, as in the turnaround.
-        _sword = _skeleton.Add("sword", _armNearLower, 42f, 3.4f, BladeSteel, dSword,
-            -1.35f, tipThickness: 1.6f);
-        _sword.Highlight = SteelLight;
-
-        _legNearUpper = _skeleton.Add("legNearUpper", _pelvis, 16f, 11f, Steel, dNearLimb,
-            down, offset: new Vector2(0f, 3f), attachToTip: false);
-        _legNearUpper.Highlight = SteelLight;
-
-        _legNearLower = _skeleton.Add("legNearLower", _legNearUpper, 16f, 9f, Steel,
-            dNearLimb, 0f, tipThickness: 7f);
-        _legNearFoot = _skeleton.Add("legNearFoot", _legNearLower, 9f, 6.5f, ClothDark,
-            dNearLimb, -down * 0.9f);
-
-        // ---- cape: a chain that trails behind ----
-
-        _capeSegments = new Bone[4];
-        Bone capeParent = _chest;
-
-        for (int i = 0; i < _capeSegments.Length; i++)
+        _legsIdle = new PixelSprite(device, KnightArt.LegsIdle, p);
+        _legsWalk = new[]
         {
-            // Tapers and darkens towards the hem.
-            float t = i / (float)_capeSegments.Length;
-            Color shade = Color.Lerp(CapeRed, CapeRedDark, t);
+            new PixelSprite(device, KnightArt.LegsWalk0, p),
+            new PixelSprite(device, KnightArt.LegsWalk1, p),
+            new PixelSprite(device, KnightArt.LegsWalk2, p),
+            new PixelSprite(device, KnightArt.LegsWalk1, p)
+        };
+        _legsCrouch = new PixelSprite(device, KnightArt.LegsCrouch, p);
+        _legsJump = new PixelSprite(device, KnightArt.LegsJump, p);
+        _legsFall = new PixelSprite(device, KnightArt.LegsFall, p);
 
-            _capeSegments[i] = _skeleton.Add($"cape{i}", capeParent, 13f,
-                17f - i * 1.6f, shade, dCape,
-                i == 0 ? down * 0.92f : 0.12f,
-                offset: i == 0 ? new Vector2(-3f, 0f) : Vector2.Zero,
-                tipThickness: 15.5f - i * 1.6f,
-                attachToTip: i != 0);
+        _capeRest = new PixelSprite(device, KnightArt.CapeRest, p);
+        _capeDrift = new PixelSprite(device, KnightArt.CapeDrift, p);
+        _capeStream = new PixelSprite(device, KnightArt.CapeStream, p);
 
-            capeParent = _capeSegments[i];
-        }
-
-        // ---- wings ----
-
-        _wingFar = BuildWing("wingFar", dFarWing, WingShade);
-        _wingNear = BuildWing("wingNear", dNearWing, WingPale);
+        _wingFolded = new PixelSprite(device, KnightArt.WingFolded, p);
+        _wingOpen = new PixelSprite(device, KnightArt.WingOpen, p);
+        _wingSpread = new PixelSprite(device, KnightArt.WingSpread, p);
 
         _shadow = CreateShadowTexture(device, 64);
 
         for (int i = 0; i < _trailAge.Length; i++) _trailAge[i] = float.MaxValue;
 
-        Console.WriteLine("Character rig built procedurally (no sprite needed).");
-    }
-
-    /// <summary>Builds one wing as an upper arm, forearm and a fan of feathers.</summary>
-    private Bone[] BuildWing(string prefix, int depth, Color colour)
-    {
-        var bones = new Bone[8];
-
-        // Shoulder joint sits high on the back.
-        bones[0] = _skeleton.Add($"{prefix}Upper", _chest, 20f, 9f, colour, depth,
-            -2.5f, offset: new Vector2(-2f, 0f), tipThickness: 7f, attachToTip: false);
-
-        bones[1] = _skeleton.Add($"{prefix}Fore", bones[0], 22f, 7f, colour, depth,
-            0.85f, tipThickness: 5f);
-
-        // Six primary feathers fanning out from the forearm.
-        for (int i = 0; i < 6; i++)
-        {
-            float t = i / 5f;
-            float spread = MathHelper.Lerp(-0.55f, 1.15f, t);
-            float length = MathHelper.Lerp(30f, 17f, t * t);
-
-            bones[2 + i] = _skeleton.Add($"{prefix}Feather{i}", bones[1], length, 6.5f,
-                Color.Lerp(colour, WingShade, t * 0.45f), depth, spread,
-                tipThickness: 2f);
-        }
-
-        return bones;
+        Console.WriteLine("Knight built from pixel art data (no image files needed).");
     }
 
     private static Texture2D CreateShadowTexture(GraphicsDevice device, int size)
@@ -331,7 +220,7 @@ public class Character : IDisposable
         _trailTimer -= dt;
         if (_trailTimer <= 0f)
         {
-            _trailTimer = 0.02f;
+            _trailTimer = 0.025f;
             _trail[_trailIndex] = Position;
             _trailAge[_trailIndex] = 0f;
             _trailIndex = (_trailIndex + 1) % _trail.Length;
@@ -348,7 +237,6 @@ public class Character : IDisposable
             FacingSign = _dashDirection;
             _dashTimer = DashDuration;
             _dashCooldownTimer = DashCooldown + DashDuration;
-            _squash = 0.82f;
             return;
         }
 
@@ -364,8 +252,7 @@ public class Character : IDisposable
             OnGround = false;
             _coyoteTimer = 0f;
             _jumpBufferTimer = 0f;
-            _squash = 1.18f;
-            _wingFlap = 1f; // wings snap open on take-off
+            _wingBeat = 1f;
         }
     }
 
@@ -386,11 +273,6 @@ public class Character : IDisposable
 
         if (Position.Y >= GroundY)
         {
-            if (!OnGround && Velocity.Y > 400f)
-            {
-                _squash = MathHelper.Clamp(1f - Velocity.Y / 6000f, 0.78f, 0.97f);
-            }
-
             Position.Y = GroundY;
             Velocity.Y = 0f;
             OnGround = true;
@@ -417,249 +299,64 @@ public class Character : IDisposable
         float speedRatio = MathF.Abs(Velocity.X) / WalkSpeed;
 
         // Tying the cycle to real speed stops the feet from sliding.
-        _walkCycle += State switch
-        {
-            CharacterState.Walk => dt * 8.5f * MathF.Max(0.45f, speedRatio),
-            CharacterState.Crouch => dt * 2f,
-            _ => dt * 2f
-        };
+        _walkCycle += State == CharacterState.Walk
+            ? dt * 9f * MathF.Max(0.45f, speedRatio)
+            : dt * 2f;
 
-        _breathCycle += dt * 1.6f;
-        _squash = MathHelper.Lerp(_squash, 1f, MathF.Min(1f, 9f * dt));
-        _wingFlap = MathHelper.Lerp(_wingFlap, 0f, MathF.Min(1f, 3.5f * dt));
-
-        // Cape lag is driven by horizontal speed, so it streams out when running.
-        float targetSway = -Velocity.X / WalkSpeed * 0.55f;
-        if (!OnGround) targetSway -= 0.25f;
-        _capeSway = MathHelper.Lerp(_capeSway, targetSway, MathF.Min(1f, 5f * dt));
+        _breathCycle += dt * 1.7f;
+        _wingBeat = MathHelper.Lerp(_wingBeat, 0f, MathF.Min(1f, 3f * dt));
 
         for (int i = 0; i < _trailAge.Length; i++)
         {
             if (_trailAge[i] < float.MaxValue) _trailAge[i] += dt;
         }
-
-        PoseSkeleton();
     }
 
-    /// <summary>Writes the current pose into the bone angles.</summary>
-    private void PoseSkeleton()
+    /// <summary>Chooses the leg bitmap for the current state.</summary>
+    private PixelSprite CurrentLegs() => State switch
     {
-        const float down = MathF.PI / 2f;
+        CharacterState.Walk => _legsWalk[WalkFrame()],
+        CharacterState.Crouch => _legsCrouch,
+        CharacterState.Jump => _legsJump,
+        CharacterState.Fall => _legsFall,
+        CharacterState.Dash => _legsJump,
+        _ => _legsIdle
+    };
 
-        float swing = MathF.Sin(_walkCycle);
-        float swingOpposite = MathF.Sin(_walkCycle + MathF.PI);
-        float breath = MathF.Sin(_breathCycle);
-
-        // Reset to rest, then layer the state's pose on top.
-        _torso.LocalAngle = 0f;
-        _chest.LocalAngle = 0f;
-        _head.LocalAngle = 0f;
-
-        switch (State)
-        {
-            case CharacterState.Idle:
-                // Breathing, a slow drift in the arms, and settled legs.
-                _chest.LocalAngle = breath * 0.02f;
-                _head.LocalAngle = breath * -0.03f;
-
-                SetLeg(_legNearUpper, _legNearLower, _legNearFoot, down + 0.03f, 0.02f);
-                SetLeg(_legFarUpper, _legFarLower, _legFarFoot, down - 0.05f, 0.05f);
-
-                _armNearUpper.LocalAngle = down * 0.72f + breath * 0.03f;
-                _armNearLower.LocalAngle = 0.42f;
-                _armFarUpper.LocalAngle = down * 0.86f - breath * 0.02f;
-                _armFarLower.LocalAngle = 0.30f;
-
-                _sword.LocalAngle = -1.30f + breath * 0.02f;
-                break;
-
-            case CharacterState.Walk:
-                // Counter-rotating limbs, torso leaning into the stride.
-                _torso.LocalAngle = 0.06f;
-                _chest.LocalAngle = swing * 0.05f;
-                _head.LocalAngle = -swing * 0.04f;
-
-                SetLeg(_legNearUpper, _legNearLower, _legNearFoot,
-                    down + swing * 0.62f, MathF.Max(0f, -swing) * 0.85f);
-                SetLeg(_legFarUpper, _legFarLower, _legFarFoot,
-                    down + swingOpposite * 0.62f, MathF.Max(0f, -swingOpposite) * 0.85f);
-
-                // Arms swing opposite their leg, but the sword arm stays composed.
-                _armNearUpper.LocalAngle = down * 0.74f + swingOpposite * 0.24f;
-                _armNearLower.LocalAngle = 0.40f + MathF.Max(0f, swing) * 0.18f;
-                _armFarUpper.LocalAngle = down * 0.84f + swing * 0.34f;
-                _armFarLower.LocalAngle = 0.34f + MathF.Max(0f, swingOpposite) * 0.22f;
-
-                _sword.LocalAngle = -1.32f - swingOpposite * 0.06f;
-                break;
-
-            case CharacterState.Crouch:
-                // Deep knee bend, torso folded forward, sword drawn in.
-                _torso.LocalAngle = 0.34f;
-                _chest.LocalAngle = 0.16f;
-                _head.LocalAngle = -0.34f;
-
-                SetLeg(_legNearUpper, _legNearLower, _legNearFoot, down - 0.85f, 1.75f);
-                SetLeg(_legFarUpper, _legFarLower, _legFarFoot, down - 0.70f, 1.60f);
-
-                _armNearUpper.LocalAngle = down * 0.52f;
-                _armNearLower.LocalAngle = 0.85f;
-                _armFarUpper.LocalAngle = down * 0.66f;
-                _armFarLower.LocalAngle = 0.75f;
-
-                _sword.LocalAngle = -1.05f;
-                break;
-
-            case CharacterState.Jump:
-                // Trailing legs, sword raised, chest opened up.
-                _torso.LocalAngle = -0.10f;
-                _chest.LocalAngle = -0.06f;
-                _head.LocalAngle = 0.08f;
-
-                SetLeg(_legNearUpper, _legNearLower, _legNearFoot, down - 0.52f, 1.15f);
-                SetLeg(_legFarUpper, _legFarLower, _legFarFoot, down + 0.30f, 0.42f);
-
-                _armNearUpper.LocalAngle = down * 0.42f;
-                _armNearLower.LocalAngle = 0.30f;
-                _armFarUpper.LocalAngle = down * 1.18f;
-                _armFarLower.LocalAngle = 0.22f;
-
-                _sword.LocalAngle = -1.55f;
-                break;
-
-            case CharacterState.Fall:
-                // Legs reaching for the ground, arms out for balance.
-                _torso.LocalAngle = 0.08f;
-                _chest.LocalAngle = 0.04f;
-                _head.LocalAngle = -0.10f;
-
-                SetLeg(_legNearUpper, _legNearLower, _legNearFoot, down + 0.34f, 0.30f);
-                SetLeg(_legFarUpper, _legFarLower, _legFarFoot, down - 0.22f, 0.62f);
-
-                _armNearUpper.LocalAngle = down * 0.58f;
-                _armNearLower.LocalAngle = 0.48f;
-                _armFarUpper.LocalAngle = down * 1.32f;
-                _armFarLower.LocalAngle = 0.36f;
-
-                _sword.LocalAngle = -1.20f;
-                break;
-
-            case CharacterState.Dash:
-                // Everything streams backwards; the sword leads the charge.
-                _torso.LocalAngle = 0.30f;
-                _chest.LocalAngle = 0.14f;
-                _head.LocalAngle = -0.24f;
-
-                SetLeg(_legNearUpper, _legNearLower, _legNearFoot, down + 0.78f, 0.30f);
-                SetLeg(_legFarUpper, _legFarLower, _legFarFoot, down - 0.62f, 1.25f);
-
-                _armNearUpper.LocalAngle = down * 0.30f;
-                _armNearLower.LocalAngle = 0.12f;
-                _armFarUpper.LocalAngle = down * 1.45f;
-                _armFarLower.LocalAngle = 0.30f;
-
-                _sword.LocalAngle = -1.62f;
-                break;
-        }
-
-        PoseCape();
-        PoseWings();
+    /// <summary>Current walk frame, wrapped safely for any cycle value.</summary>
+    private int WalkFrame()
+    {
+        int frame = (int)MathF.Floor(_walkCycle) % _legsWalk.Length;
+        return frame < 0 ? frame + _legsWalk.Length : frame;
     }
 
-    /// <summary>Sets a leg from a hip angle and a knee bend.</summary>
-    private static void SetLeg(Bone upper, Bone lower, Bone foot, float hipAngle, float kneeBend)
+    /// <summary>The cape trails further the faster the knight travels.</summary>
+    private PixelSprite CurrentCape()
     {
-        upper.LocalAngle = hipAngle;
-        lower.LocalAngle = kneeBend;
+        if (State == CharacterState.Dash) return _capeStream;
 
-        // Keep the foot roughly flat to the ground regardless of the leg pose.
-        foot.LocalAngle = -(hipAngle - MathF.PI / 2f) - kneeBend - MathF.PI / 2f;
+        float speed = MathF.Abs(Velocity.X) / WalkSpeed;
+        if (!OnGround || speed > 0.55f) return _capeStream;
+        if (speed > 0.15f) return _capeDrift;
+
+        // A slow flutter while standing still.
+        return MathF.Sin(_breathCycle * 0.7f) > 0.6f ? _capeDrift : _capeRest;
     }
 
-    private void PoseCape()
+    /// <summary>Wings open up in the air and beat on take-off.</summary>
+    private PixelSprite CurrentWing()
     {
-        const float down = MathF.PI / 2f;
-
-        // Each segment lags a little more than the one above, so the cape
-        // ripples rather than swinging as a rigid board.
-        float flutter = MathF.Sin(_walkCycle * 1.6f) * 0.05f;
-
-        for (int i = 0; i < _capeSegments.Length; i++)
-        {
-            float lag = 1f + i * 0.55f;
-
-            if (i == 0)
-            {
-                _capeSegments[i].LocalAngle = down * 0.92f + _capeSway * 0.35f;
-            }
-            else
-            {
-                _capeSegments[i].LocalAngle = 0.10f + _capeSway * 0.30f * lag + flutter * i;
-            }
-        }
-    }
-
-    private void PoseWings()
-    {
-        // A slow idle drift, overridden by a strong beat when airborne.
-        float idle = MathF.Sin(_breathCycle * 0.9f) * 0.05f;
-        float airborne = OnGround ? 0f : 0.30f;
-        float beat = _wingFlap * 0.55f;
-
-        float openFar = -2.45f - idle - airborne - beat;
-        float openNear = -2.30f + idle - airborne * 0.85f - beat * 0.9f;
-
-        _wingFar[0].LocalAngle = openFar;
-        _wingFar[1].LocalAngle = 0.85f + beat * 0.35f + idle;
-
-        _wingNear[0].LocalAngle = openNear;
-        _wingNear[1].LocalAngle = 0.80f + beat * 0.30f - idle;
-
-        // Feathers splay wider as the wing opens.
-        for (int i = 0; i < 6; i++)
-        {
-            float t = i / 5f;
-            float baseSpread = MathHelper.Lerp(-0.55f, 1.15f, t);
-            float splay = (beat + airborne) * MathHelper.Lerp(0.10f, 0.32f, t);
-            float ripple = MathF.Sin(_breathCycle * 1.2f + i * 0.5f) * 0.025f;
-
-            _wingFar[2 + i].LocalAngle = baseSpread + splay + ripple;
-            _wingNear[2 + i].LocalAngle = baseSpread + splay - ripple;
-        }
+        if (_wingBeat > 0.45f || State == CharacterState.Dash) return _wingSpread;
+        if (!OnGround) return _wingOpen;
+        return _wingFolded;
     }
 
     public void Draw(SpriteBatch spriteBatch, float cameraX)
     {
-        float screenX = Position.X - cameraX;
+        // Whole-number scale only: anything else destroys the pixel grid.
+        int scale = Math.Max(1, (int)MathF.Round(DisplayHeight / ArtHeight));
 
-        // Rig units to screen pixels.
-        float scale = DisplayHeight / RigHeight;
-
-        float bob = 0f;
-        float scaleY = _squash;
-        float lean = 0f;
-
-        switch (State)
-        {
-            case CharacterState.Walk:
-                bob = -MathF.Abs(MathF.Sin(_walkCycle)) * DisplayHeight * 0.018f;
-                lean = 0.02f;
-                break;
-            case CharacterState.Idle:
-                bob = -MathF.Abs(MathF.Sin(_breathCycle)) * DisplayHeight * 0.004f;
-                break;
-            case CharacterState.Dash:
-                lean = 0.10f;
-                break;
-            case CharacterState.Jump:
-                lean = 0.04f;
-                break;
-            case CharacterState.Fall:
-                lean = -0.03f;
-                break;
-        }
-
-        bool mirror = FacingSign < 0;
+        float screenXf = Position.X - cameraX;
 
         // ---- dash trail ----
 
@@ -668,14 +365,13 @@ public class Character : IDisposable
             for (int i = 0; i < _trail.Length; i++)
             {
                 float age = _trailAge[i];
-                if (age > 0.22f) continue;
+                if (age > 0.20f) continue;
 
-                float fade = 1f - age / 0.22f;
-                float ghostX = _trail[i].X - cameraX;
-
-                _skeleton.Resolve(new Vector2(ghostX, _trail[i].Y), lean * FacingSign);
-                _skeleton.Draw(spriteBatch, scale * scaleY, mirror, ghostX,
-                    new Color(150, 170, 255), fade * 0.30f);
+                float fade = 1f - age / 0.20f;
+                DrawKnight(spriteBatch,
+                    (int)MathF.Round(_trail[i].X - cameraX),
+                    (int)MathF.Round(_trail[i].Y),
+                    scale, new Color(140, 165, 255) * (fade * 0.35f));
             }
         }
 
@@ -684,30 +380,113 @@ public class Character : IDisposable
         float airHeight = MathHelper.Clamp((GroundY - Position.Y) / 260f, 0f, 1f);
         float shadowScale = 1f - airHeight * 0.45f;
         float shadowAlpha = 1f - airHeight * 0.55f;
-        float shadowWidth = DisplayHeight * 0.42f * shadowScale;
+        float shadowWidth = ArtHeight * scale * 0.40f * shadowScale;
         float shadowHeight = shadowWidth * 0.26f;
 
         spriteBatch.Draw(_shadow,
             new Rectangle(
-                (int)(screenX - shadowWidth / 2f),
+                (int)(screenXf - shadowWidth / 2f),
                 (int)(GroundY - shadowHeight / 2f),
                 (int)shadowWidth,
                 (int)shadowHeight),
             Color.White * shadowAlpha);
 
-        // ---- character ----
+        // ---- knight ----
 
-        // Bones are authored pointing up from the feet, so the root sits at the
-        // ground contact point and the whole rig grows upward from there.
-        var root = new Vector2(screenX, Position.Y + bob);
+        DrawKnight(spriteBatch, (int)MathF.Round(screenXf),
+            (int)MathF.Round(Position.Y), scale, Color.White);
+    }
 
-        _skeleton.Resolve(root, lean * FacingSign);
-        _skeleton.Draw(spriteBatch, scale * scaleY, mirror, screenX, Color.White);
+    /// <summary>
+    /// Lays out every part relative to the feet. All offsets are in art pixels
+    /// and multiplied by the scale, which keeps the pixel grid intact.
+    /// </summary>
+    private void DrawKnight(SpriteBatch spriteBatch, int footX, int footY, int scale, Color tint)
+    {
+        bool flip = FacingSign < 0;
+
+        // A one-pixel bob, applied in art pixels so it stays on the grid.
+        int bob = State switch
+        {
+            CharacterState.Walk => MathF.Sin(_walkCycle * MathF.PI / 2f) > 0.5f ? -1 : 0,
+            CharacterState.Idle => MathF.Sin(_breathCycle) > 0.7f ? -1 : 0,
+            _ => 0
+        };
+
+        // Crouching drops the whole upper body.
+        int crouchDrop = State == CharacterState.Crouch ? 5 : 0;
+
+        PixelSprite legs = CurrentLegs();
+        PixelSprite cape = CurrentCape();
+        PixelSprite wing = CurrentWing();
+
+        // Vertical layout, measured up from the feet.
+        int legsTop = -legs.Height;
+        int torsoTop = legsTop - _torso.Height + 2 + crouchDrop;
+        int headTop = torsoTop - _head.Height + 2;
+
+        // Helper that converts art-space offsets into screen pixels, mirroring
+        // horizontally when the knight faces left.
+        void Blit(PixelSprite sprite, int offsetX, int offsetY)
+        {
+            int x = flip
+                ? footX - (offsetX + sprite.Width) * scale
+                : footX + offsetX * scale;
+
+            sprite.Draw(spriteBatch, x, footY + (offsetY + bob) * scale, scale, flip, tint);
+        }
+
+        // ---- back to front ----
+
+        // Far wing, behind everything, offset back and up.
+        Blit(wing, -13, torsoTop - 3);
+
+        // Cape hangs from the shoulders.
+        Blit(cape, -7, torsoTop + 2);
+
+        // Far arm sits behind the torso.
+        Blit(_armFar, -1, torsoTop + 3);
+
+        Blit(legs, -7, legsTop);
+        Blit(_torso, -6, torsoTop);
+
+        // Head, with the plume angled back over it.
+        Blit(_head, -5, headTop);
+        Blit(_plume, -9, headTop - 3);
+
+        // Near arm and the blade it holds, in front of the torso.
+        Blit(_armNear, 2, torsoTop + 3);
+
+        // The sword is held point-up, hilt at the gauntlet.
+        Blit(_sword, 4, torsoTop - 9);
     }
 
     public void Dispose()
     {
-        _skeleton?.Dispose();
+        _head?.Dispose();
+        _plume?.Dispose();
+        _torso?.Dispose();
+        _armNear?.Dispose();
+        _armFar?.Dispose();
+        _sword?.Dispose();
+
+        _legsIdle?.Dispose();
+        if (_legsWalk != null)
+        {
+            foreach (PixelSprite sprite in _legsWalk) sprite?.Dispose();
+        }
+        _legsCrouch?.Dispose();
+        _legsJump?.Dispose();
+        _legsFall?.Dispose();
+
+        _capeRest?.Dispose();
+        _capeDrift?.Dispose();
+        _capeStream?.Dispose();
+
+        _wingFolded?.Dispose();
+        _wingOpen?.Dispose();
+        _wingSpread?.Dispose();
+
         _shadow?.Dispose();
     }
 }
