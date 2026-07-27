@@ -33,8 +33,15 @@ public class ParallaxLayer
     /// <summary>Tint applied when drawing, used to push distant layers back.</summary>
     public Color Tint { get; }
 
+    /// <summary>
+    /// Flips every second copy horizontally. The source art is not seamless, so
+    /// butting copies edge to edge leaves a visible join; mirroring guarantees the
+    /// touching edges are identical and the join disappears.
+    /// </summary>
+    public bool MirrorTile { get; }
+
     public ParallaxLayer(Texture2D texture, Rectangle source, float scrollFactor,
-        float bottomAnchor, float heightFactor, Color tint)
+        float bottomAnchor, float heightFactor, Color tint, bool mirrorTile = false)
     {
         Texture = texture;
         Source = source;
@@ -42,6 +49,7 @@ public class ParallaxLayer
         BottomAnchor = bottomAnchor;
         HeightFactor = heightFactor;
         Tint = tint;
+        MirrorTile = mirrorTile;
     }
 }
 
@@ -68,7 +76,10 @@ public class ParallaxBackground : IDisposable
     // How tall each layer is drawn, as a fraction of the screen height.
     private const float GroundHeight = 0.17f;
     private const float WallsHeight = 0.40f;
-    private const float MountainsHeight = 0.30f;
+
+    // The mountains have to out-reach the ruins or they are never seen, so they
+    // are both taller and seated higher than the wall line.
+    private const float MountainsHeight = 0.46f;
 
     public ParallaxBackground(GraphicsDevice device, string assetDir)
     {
@@ -88,7 +99,7 @@ public class ParallaxBackground : IDisposable
             // Barely moves: the sky is effectively at infinity. It covers the
             // whole screen so nothing shows through behind the other layers.
             _layers.Add(new ParallaxLayer(sky, TextureLoader.GetOpaqueBounds(sky),
-                0.05f, 1.0f, 1.0f, Color.White));
+                0.05f, 1.0f, 1.0f, Color.White, mirrorTile: true));
         }
 
         Texture2D? mountains = TextureLoader.LoadAny(device, assetDir,
@@ -98,8 +109,10 @@ public class ParallaxBackground : IDisposable
         else
         {
             // Dimmed and cooled slightly so it recedes behind the ruins.
+            // Sits above the wall line so the peaks clear the ruins.
             _layers.Add(new ParallaxLayer(mountains, TextureLoader.GetOpaqueBounds(mountains),
-                0.20f, groundTop + 0.02f, MountainsHeight, new Color(175, 185, 205)));
+                0.20f, groundTop - 0.05f, MountainsHeight, new Color(175, 185, 205),
+                mirrorTile: true));
         }
 
         Texture2D? walls = TextureLoader.LoadAny(device, assetDir,
@@ -140,18 +153,30 @@ public class ParallaxBackground : IDisposable
             float scale = height / (float)layer.Source.Height;
             int width = Math.Max(1, (int)(layer.Source.Width * scale));
 
-            // Where this layer has scrolled to, wrapped into a single tile width.
+            // Where this layer has scrolled to.
             float offset = -cameraX * layer.ScrollFactor;
-            float wrapped = offset % width;
-            if (wrapped > 0) wrapped -= width;
 
-            // One extra copy past the right edge covers the seam.
-            for (float x = wrapped; x < screenWidth; x += width)
+            // Index of the tile covering the left edge of the screen. Working in
+            // absolute tile indices keeps the mirror pattern stable while
+            // scrolling, instead of flipping as tiles recycle.
+            int firstTile = (int)MathF.Floor(-offset / width);
+
+            for (int tile = firstTile; ; tile++)
             {
+                float x = offset + tile * width;
+                if (x >= screenWidth) break;
+
+                var effects = SpriteEffects.None;
+                if (layer.MirrorTile)
+                {
+                    // Positive modulo, so the pattern holds for negative indices.
+                    int parity = ((tile % 2) + 2) % 2;
+                    if (parity == 1) effects = SpriteEffects.FlipHorizontally;
+                }
+
                 spriteBatch.Draw(layer.Texture,
                     new Rectangle((int)MathF.Round(x), top, width, height),
-                    layer.Source,
-                    layer.Tint);
+                    layer.Source, layer.Tint, 0f, Vector2.Zero, effects, 0f);
             }
         }
     }

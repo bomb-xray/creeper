@@ -47,8 +47,9 @@ public class GameScene : IDisposable
 
         AssetPath = Path.GetFullPath(assetDir);
 
+        // The character is generated from a bone rig, so only backdrop art can
+        // ever be missing.
         MissingArt.AddRange(_background.MissingLayers);
-        if (!_player.HasArt) MissingArt.Add("side");
 
         // List what is really there, which is the fastest way to spot a wrong
         // folder or a misspelled file name.
