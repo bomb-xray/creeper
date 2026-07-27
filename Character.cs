@@ -16,15 +16,15 @@ public enum CharacterState
 }
 
 /// <summary>
-/// The player: a winged knight assembled from hand-authored pixel parts.
+/// The player: a winged knight animated from a pre-rendered sprite sheet.
 ///
-/// The art lives in <see cref="KnightArt"/> as character strings, so no image
-/// files are needed and every part can be posed independently. Animation is done
-/// the way pixel art demands: whole-pixel offsets and frame swaps, never rotation
-/// or fractional scaling, both of which would smear the pixels.
+/// The frames are produced by design/knight.py, which poses the figure as
+/// geometry and runs it through a shading pass (distance-field lighting, ramp
+/// quantisation, outline tracing) before exporting. Posing therefore happens at
+/// design time, and the game only ever blits finished bitmaps at whole-number
+/// scales, which keeps the pixel grid perfectly intact.
 ///
-/// Parts are drawn back to front: far wing, cape, far arm, legs, torso, head,
-/// near arm, sword, near wing.
+/// Sheet layout: 4 idle frames, 8 walk frames, then crouch, jump, fall, dash.
 /// </summary>
 public class Character : IDisposable
 {
@@ -35,8 +35,6 @@ public class Character : IDisposable
     private const float Gravity = 2300f;
     private const float MaxFallSpeed = 1400f;
 
-    // Dash tuning: a short, very fast burst that covers real ground, then a
-    // recovery window. Short and sharp reads better than long and floaty.
     private const float DashSpeed = 1500f;
     private const float DashDuration = 0.16f;
     private const float DashCooldown = 0.32f;
@@ -48,34 +46,34 @@ public class Character : IDisposable
     private const float CoyoteTime = 0.10f;
     private const float JumpBufferTime = 0.12f;
 
-    /// <summary>Height of the assembled knight in art pixels.</summary>
-    private const int ArtHeight = KnightArt.Height;
+    // ---- sheet layout ------------------------------------------------------
+    // Must match the export in design/knight.py.
 
-    // ---- sprites -----------------------------------------------------------
+    private const int FrameWidth = 110;
+    private const int FrameHeight = 114;
 
-    private readonly PixelSprite _head;
-    private readonly PixelSprite _plume;
-    private readonly PixelSprite _torso;
-    private readonly PixelSprite _armNear;
-    private readonly PixelSprite _armFar;
-    private readonly PixelSprite _sword;
+    /// <summary>Where the feet sit inside a frame.</summary>
+    private const int FootX = 60;
+    private const int FootY = 106;
 
-    private readonly PixelSprite _legsIdle;
-    private readonly PixelSprite[] _legsWalk;
-    private readonly PixelSprite _legsCrouch;
-    private readonly PixelSprite _legsJump;
-    private readonly PixelSprite _legsFall;
-    private readonly PixelSprite _legsDash;
+    /// <summary>Height of the knight in art pixels, used to pick the draw scale.</summary>
+    private const int ArtHeight = 100;
 
-    private readonly PixelSprite _capeRest;
-    private readonly PixelSprite _capeDrift;
-    private readonly PixelSprite _capeStream;
+    private const int IdleStart = 0, IdleCount = 4;
+    private const int WalkStart = 4, WalkCount = 8;
+    private const int CrouchFrame = 12;
+    private const int JumpFrame = 13;
+    private const int FallFrame = 14;
+    private const int DashFrame = 15;
 
-    private readonly PixelSprite _wingFolded;
-    private readonly PixelSprite _wingOpen;
-    private readonly PixelSprite _wingSpread;
+    // ---- resources ---------------------------------------------------------
 
+    private readonly Texture2D? _sheet;
+    private readonly Rectangle[] _frames;
     private readonly Texture2D _shadow;
+
+    /// <summary>Fallback box used when the sheet is missing, so the game still runs.</summary>
+    private readonly Texture2D _fallback;
 
     // ---- state -------------------------------------------------------------
 
@@ -92,71 +90,53 @@ public class Character : IDisposable
     public bool OnGround { get; private set; } = true;
     public bool IsCrouching { get; private set; }
 
-    /// <summary>The art is generated, so there is always something to draw.</summary>
-    public bool HasArt => true;
+    public bool HasArt => _sheet != null;
 
     /// <summary>Ground height in world space; set by the scene each frame.</summary>
     public float GroundY { get; set; }
 
-    private float _walkCycle;
-    private float _breathCycle;
+    private float _animTime;
     private float _coyoteTimer;
     private float _jumpBufferTimer;
     private float _dashTimer;
     private float _dashCooldownTimer;
     private int _dashDirection = 1;
 
-    /// <summary>Wing beat strength, spiking on take-off and decaying.</summary>
-    private float _wingBeat;
-
-    // A dense ghost trail is the signature of the dash: several afterimages that
-    // linger and fade rather than one blurred smear.
+    // A dense ghost trail is the signature of the dash: several afterimages
+    // that linger and fade rather than one blurred smear.
     private const int TrailLength = 10;
     private const float TrailLifetime = 0.30f;
 
     private readonly Vector2[] _trail = new Vector2[TrailLength];
     private readonly float[] _trailAge = new float[TrailLength];
     private readonly int[] _trailFacing = new int[TrailLength];
+    private readonly int[] _trailFrame = new int[TrailLength];
     private int _trailIndex;
     private float _trailTimer;
 
     public Character(GraphicsDevice device, string assetDir)
     {
-        var p = KnightArt.Palette;
+        _sheet = TextureLoader.Load(device, assetDir, "knight", false);
 
-        _head = new PixelSprite(device, KnightArt.Head, p);
-        _plume = new PixelSprite(device, KnightArt.Plume, p);
-        _torso = new PixelSprite(device, KnightArt.Torso, p);
-        _armNear = new PixelSprite(device, KnightArt.ArmNear, p);
-        _armFar = new PixelSprite(device, KnightArt.ArmFar, p);
-        _sword = new PixelSprite(device, KnightArt.Sword, p);
-
-        _legsIdle = new PixelSprite(device, KnightArt.LegsIdle, p);
-        _legsWalk = new[]
+        if (_sheet == null)
         {
-            new PixelSprite(device, KnightArt.LegsWalk0, p),
-            new PixelSprite(device, KnightArt.LegsWalk1, p),
-            new PixelSprite(device, KnightArt.LegsWalk2, p),
-            new PixelSprite(device, KnightArt.LegsWalk3, p)
-        };
-        _legsCrouch = new PixelSprite(device, KnightArt.LegsCrouch, p);
-        _legsJump = new PixelSprite(device, KnightArt.LegsJump, p);
-        _legsFall = new PixelSprite(device, KnightArt.LegsFall, p);
-        _legsDash = new PixelSprite(device, KnightArt.LegsDash, p);
+            Console.WriteLine("knight.png not found; run design/knight.py to regenerate it.");
+        }
 
-        _capeRest = new PixelSprite(device, KnightArt.CapeRest, p);
-        _capeDrift = new PixelSprite(device, KnightArt.CapeDrift, p);
-        _capeStream = new PixelSprite(device, KnightArt.CapeStream, p);
-
-        _wingFolded = new PixelSprite(device, KnightArt.WingFolded, p);
-        _wingOpen = new PixelSprite(device, KnightArt.WingOpen, p);
-        _wingSpread = new PixelSprite(device, KnightArt.WingSpread, p);
+        // Frame rectangles across the strip.
+        int count = _sheet != null ? Math.Max(1, _sheet.Width / FrameWidth) : 16;
+        _frames = new Rectangle[count];
+        for (int i = 0; i < count; i++)
+        {
+            _frames[i] = new Rectangle(i * FrameWidth, 0, FrameWidth, FrameHeight);
+        }
 
         _shadow = CreateShadowTexture(device, 64);
 
-        for (int i = 0; i < _trailAge.Length; i++) _trailAge[i] = float.MaxValue;
+        _fallback = new Texture2D(device, 1, 1);
+        _fallback.SetData(new[] { new Color(180, 60, 60) });
 
-        Console.WriteLine("Knight built from pixel art data (no image files needed).");
+        for (int i = 0; i < _trailAge.Length; i++) _trailAge[i] = float.MaxValue;
     }
 
     private static Texture2D CreateShadowTexture(GraphicsDevice device, int size)
@@ -233,7 +213,6 @@ public class Character : IDisposable
         // Weightless while dashing, which is what makes it useful over gaps.
         Velocity.Y = 0f;
 
-        // Hand back some momentum on the final frame.
         if (_dashTimer <= dt)
         {
             Velocity.X = _dashDirection * DashSpeed * DashExitSpeed;
@@ -246,6 +225,7 @@ public class Character : IDisposable
             _trail[_trailIndex] = Position;
             _trailAge[_trailIndex] = 0f;
             _trailFacing[_trailIndex] = FacingSign;
+            _trailFrame[_trailIndex] = DashFrame;
             _trailIndex = (_trailIndex + 1) % _trail.Length;
         }
     }
@@ -275,7 +255,6 @@ public class Character : IDisposable
             OnGround = false;
             _coyoteTimer = 0f;
             _jumpBufferTimer = 0f;
-            _wingBeat = 1f;
         }
     }
 
@@ -319,15 +298,15 @@ public class Character : IDisposable
 
     private void UpdateAnimation(float dt)
     {
+        // The walk cycle is driven by real speed, so the feet never slide.
         float speedRatio = MathF.Abs(Velocity.X) / WalkSpeed;
 
-        // Tying the cycle to real speed stops the feet from sliding.
-        _walkCycle += State == CharacterState.Walk
-            ? dt * 9f * MathF.Max(0.45f, speedRatio)
-            : dt * 2f;
-
-        _breathCycle += dt * 1.7f;
-        _wingBeat = MathHelper.Lerp(_wingBeat, 0f, MathF.Min(1f, 3f * dt));
+        _animTime += State switch
+        {
+            CharacterState.Walk => dt * 11f * MathF.Max(0.45f, speedRatio),
+            CharacterState.Idle => dt * 4.5f,
+            _ => dt * 6f
+        };
 
         for (int i = 0; i < _trailAge.Length; i++)
         {
@@ -335,43 +314,32 @@ public class Character : IDisposable
         }
     }
 
-    /// <summary>Chooses the leg bitmap for the current state.</summary>
-    private PixelSprite CurrentLegs() => State switch
+    /// <summary>Index into the sprite sheet for the current state.</summary>
+    private int CurrentFrame()
     {
-        CharacterState.Walk => _legsWalk[WalkFrame()],
-        CharacterState.Crouch => _legsCrouch,
-        CharacterState.Jump => _legsJump,
-        CharacterState.Fall => _legsFall,
-        CharacterState.Dash => _legsDash,
-        _ => _legsIdle
-    };
-
-    /// <summary>Current walk frame, wrapped safely for any cycle value.</summary>
-    private int WalkFrame()
-    {
-        int frame = (int)MathF.Floor(_walkCycle) % _legsWalk.Length;
-        return frame < 0 ? frame + _legsWalk.Length : frame;
+        switch (State)
+        {
+            case CharacterState.Walk:
+                return WalkStart + Wrap((int)_animTime, WalkCount);
+            case CharacterState.Idle:
+                return IdleStart + Wrap((int)_animTime, IdleCount);
+            case CharacterState.Crouch:
+                return CrouchFrame;
+            case CharacterState.Jump:
+                return JumpFrame;
+            case CharacterState.Fall:
+                return FallFrame;
+            case CharacterState.Dash:
+                return DashFrame;
+            default:
+                return IdleStart;
+        }
     }
 
-    /// <summary>The cape trails further the faster the knight travels.</summary>
-    private PixelSprite CurrentCape()
+    private static int Wrap(int value, int count)
     {
-        if (State == CharacterState.Dash) return _capeStream;
-
-        float speed = MathF.Abs(Velocity.X) / WalkSpeed;
-        if (!OnGround || speed > 0.55f) return _capeStream;
-        if (speed > 0.15f) return _capeDrift;
-
-        // A slow flutter while standing still.
-        return MathF.Sin(_breathCycle * 0.7f) > 0.6f ? _capeDrift : _capeRest;
-    }
-
-    /// <summary>Wings open up in the air and beat on take-off.</summary>
-    private PixelSprite CurrentWing()
-    {
-        if (_wingBeat > 0.45f || State == CharacterState.Dash) return _wingSpread;
-        if (!OnGround) return _wingOpen;
-        return _wingFolded;
+        int result = value % count;
+        return result < 0 ? result + count : result;
     }
 
     public void Draw(SpriteBatch spriteBatch, float cameraX)
@@ -381,10 +349,33 @@ public class Character : IDisposable
 
         float screenXf = Position.X - cameraX;
 
-        // ---- dash trail ----
+        // ---- shadow ----
 
-        // Ghosts outlive the dash itself, so they keep streaming after the burst.
-        int savedFacing = FacingSign;
+        float airHeight = MathHelper.Clamp((GroundY - Position.Y) / 260f, 0f, 1f);
+        float shadowScale = 1f - airHeight * 0.45f;
+        float shadowAlpha = 1f - airHeight * 0.55f;
+        float shadowWidth = ArtHeight * scale * 0.34f * shadowScale;
+        float shadowHeight = shadowWidth * 0.26f;
+
+        spriteBatch.Draw(_shadow,
+            new Rectangle(
+                (int)(screenXf - shadowWidth / 2f),
+                (int)(GroundY - shadowHeight / 2f),
+                (int)shadowWidth,
+                (int)shadowHeight),
+            Color.White * shadowAlpha);
+
+        if (_sheet == null)
+        {
+            // Still show something solid so the scene is testable.
+            int w = 20 * scale, h = ArtHeight * scale;
+            spriteBatch.Draw(_fallback,
+                new Rectangle((int)screenXf - w / 2, (int)Position.Y - h, w, h),
+                Color.White);
+            return;
+        }
+
+        // ---- ghost trail, drawn behind the knight ----
 
         for (int i = 0; i < _trail.Length; i++)
         {
@@ -399,139 +390,45 @@ public class Character : IDisposable
                 new Color(230, 240, 255),
                 fade);
 
-            FacingSign = _trailFacing[i];
-
-            DrawKnight(spriteBatch,
+            DrawFrame(spriteBatch, _trailFrame[i],
                 (int)MathF.Round(_trail[i].X - cameraX),
                 (int)MathF.Round(_trail[i].Y),
-                scale, ghost * (fade * fade * 0.55f));
+                scale, _trailFacing[i] < 0, ghost * (fade * fade * 0.55f));
         }
-
-        FacingSign = savedFacing;
-
-        // ---- shadow ----
-
-        float airHeight = MathHelper.Clamp((GroundY - Position.Y) / 260f, 0f, 1f);
-        float shadowScale = 1f - airHeight * 0.45f;
-        float shadowAlpha = 1f - airHeight * 0.55f;
-        float shadowWidth = ArtHeight * scale * 0.40f * shadowScale;
-        float shadowHeight = shadowWidth * 0.26f;
-
-        spriteBatch.Draw(_shadow,
-            new Rectangle(
-                (int)(screenXf - shadowWidth / 2f),
-                (int)(GroundY - shadowHeight / 2f),
-                (int)shadowWidth,
-                (int)shadowHeight),
-            Color.White * shadowAlpha);
 
         // ---- knight ----
 
-        DrawKnight(spriteBatch, (int)MathF.Round(screenXf),
-            (int)MathF.Round(Position.Y), scale, Color.White);
+        DrawFrame(spriteBatch, CurrentFrame(),
+            (int)MathF.Round(screenXf), (int)MathF.Round(Position.Y),
+            scale, FacingSign < 0, Color.White);
     }
 
-    /// <summary>
-    /// Lays out every part relative to the feet, using the same offsets as the
-    /// design-time preview in design/art.py. All values are art pixels scaled by
-    /// a whole number, which keeps the pixel grid intact.
-    /// </summary>
-    private void DrawKnight(SpriteBatch spriteBatch, int footX, int footY, int scale, Color tint)
+    /// <summary>Blits one sheet frame with its foot anchor on the given point.</summary>
+    private void DrawFrame(SpriteBatch spriteBatch, int frame, int footX, int footY,
+        int scale, bool flip, Color tint)
     {
-        bool flip = FacingSign < 0;
+        if (_sheet == null) return;
 
-        PixelSprite legs = CurrentLegs();
-        PixelSprite cape = CurrentCape();
-        PixelSprite wing = CurrentWing();
+        frame = Math.Clamp(frame, 0, _frames.Length - 1);
+        Rectangle source = _frames[frame];
 
-        // A single-pixel bob keeps the walk and idle alive without leaving the grid.
-        int bob = State switch
-        {
-            CharacterState.Walk => MathF.Sin(_walkCycle * MathF.PI / 2f) > 0.5f ? -1 : 0,
-            CharacterState.Idle => MathF.Sin(_breathCycle) > 0.7f ? -1 : 0,
-            _ => 0
-        };
+        // Mirroring reflects the anchor across the frame, so the feet stay put.
+        int anchorX = flip ? FrameWidth - FootX : FootX;
 
-        // Per-state adjustments, mirroring the preview poses.
-        int bodyDrop = 0;    // lowers the upper body
-        int swordLift = 0;   // raises the blade
-        int lunge = 0;       // pushes the upper body forward
+        var destination = new Rectangle(
+            footX - anchorX * scale,
+            footY - FootY * scale,
+            FrameWidth * scale,
+            FrameHeight * scale);
 
-        switch (State)
-        {
-            case CharacterState.Crouch:
-                bodyDrop = 8;
-                swordLift = -4;
-                break;
-            case CharacterState.Jump:
-                swordLift = 4;
-                break;
-            case CharacterState.Dash:
-                // Low forward lunge with the blade tucked back.
-                bodyDrop = 6;
-                swordLift = -6;
-                lunge = 3;
-                break;
-        }
-
-        // Vertical stack measured up from the feet, matching art.py's compose().
-        int legsY = -legs.Height;
-        int torsoY = legsY - 20 + 4 + bodyDrop;      // torso art is 20 tall
-        int headY = torsoY - 14 + 3;                 // head art is 14 tall
-
-        int legsX = -10;
-        int torsoX = -8 + lunge;
-        int headX = -6 + lunge;
-
-        // Converts art-space offsets to screen pixels, mirroring when facing left.
-        void Blit(PixelSprite sprite, int offsetX, int offsetY, Color colour)
-        {
-            int x = flip
-                ? footX - (offsetX + sprite.Width) * scale
-                : footX + offsetX * scale;
-
-            sprite.Draw(spriteBatch, x, footY + (offsetY + bob) * scale, scale, flip, colour);
-        }
-
-        // Back to front.
-        Blit(wing, torsoX - 11, torsoY - 6, tint);
-        Blit(cape, torsoX - 8, torsoY + 2, tint);
-        Blit(_armFar, torsoX + 1, torsoY + 3, tint);
-        Blit(legs, legsX, legsY, tint);
-        Blit(_torso, torsoX, torsoY, tint);
-        Blit(_head, headX, headY, tint);
-        Blit(_plume, headX - 7, headY - 2, tint);
-        Blit(_armNear, torsoX + 9, torsoY + 4, tint);
-        Blit(_sword, torsoX + 13, torsoY - 14 - swordLift, tint);
+        spriteBatch.Draw(_sheet, destination, source, tint, 0f, Vector2.Zero,
+            flip ? SpriteEffects.FlipHorizontally : SpriteEffects.None, 0f);
     }
 
     public void Dispose()
     {
-        _head?.Dispose();
-        _plume?.Dispose();
-        _torso?.Dispose();
-        _armNear?.Dispose();
-        _armFar?.Dispose();
-        _sword?.Dispose();
-
-        _legsIdle?.Dispose();
-        if (_legsWalk != null)
-        {
-            foreach (PixelSprite sprite in _legsWalk) sprite?.Dispose();
-        }
-        _legsCrouch?.Dispose();
-        _legsJump?.Dispose();
-        _legsFall?.Dispose();
-        _legsDash?.Dispose();
-
-        _capeRest?.Dispose();
-        _capeDrift?.Dispose();
-        _capeStream?.Dispose();
-
-        _wingFolded?.Dispose();
-        _wingOpen?.Dispose();
-        _wingSpread?.Dispose();
-
+        _sheet?.Dispose();
         _shadow?.Dispose();
+        _fallback?.Dispose();
     }
 }
