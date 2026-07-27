@@ -130,7 +130,11 @@ public class Character : IDisposable
                 float strength = MathHelper.Clamp(1f - distance, 0f, 1f);
                 strength *= strength;
 
-                pixels[y * size + x] = new Color(0, 0, 0, (byte)(strength * 150));
+                // All four arguments must be the same type, otherwise the int
+                // and byte constructor overloads are ambiguous.
+                var shadowPixel = Color.Black;
+                shadowPixel.A = (byte)(strength * 150);
+                pixels[y * size + x] = shadowPixel;
             }
         }
 
