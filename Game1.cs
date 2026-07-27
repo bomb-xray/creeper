@@ -15,7 +15,6 @@ public enum GameState
     MainMenu,
     FileSelect,
     OpeningVideo,
-    ComingSoon,
     Playing
 }
 
@@ -79,16 +78,6 @@ public class Game1 : Game
     private VideoPlayback? _video;
     private float _videoFadeAlpha;
     private string _assetDir = "assets";
-
-    // "Coming soon" end card shown after the video / when loading an existing run
-    private float _comingSoonTimer;
-    private bool _comingSoonSkippable;
-
-    /// <summary>Set when the card follows a brand new run rather than a continue.</summary>
-    private bool _comingSoonFromNewGame;
-
-    /// <summary>Why the opening video did not play, shown on the card. Empty when it did.</summary>
-    private string _videoSkipReason = string.Empty;
 
     // The playable side-scrolling scene, entered from a save slot
     private GameScene? _scene;
@@ -376,9 +365,6 @@ public class Game1 : Game
             case GameState.OpeningVideo:
                 UpdateOpeningVideo(dt, kb);
                 break;
-            case GameState.ComingSoon:
-                UpdateComingSoon(dt, kb);
-                break;
             case GameState.Playing:
                 UpdatePlaying(dt, kb);
                 break;
@@ -406,13 +392,9 @@ public class Game1 : Game
                 break;
 
             case GameState.OpeningVideo:
-                // Skipping the video jumps straight to the end card.
+                // Skipping the cutscene drops straight into the game.
                 StopVideo();
-                EnterComingSoon();
-                break;
-
-            case GameState.ComingSoon:
-                ReturnToMenu();
+                EnterPlaying();
                 break;
 
             case GameState.Playing:
@@ -642,8 +624,6 @@ public class Game1 : Game
     private void SelectSlot(int index)
     {
         bool isNewGame = !_saves[index].Exists;
-        _comingSoonFromNewGame = isNewGame;
-        _videoSkipReason = string.Empty;
 
         if (isNewGame)
         {
@@ -654,7 +634,7 @@ public class Game1 : Game
         else
         {
             Console.WriteLine($"Continuing save slot {index + 1}: {_saves[index].Name}");
-            EnterComingSoon();
+            EnterPlaying();
         }
     }
 
@@ -666,9 +646,8 @@ public class Game1 : Game
 
         if (videoPath == null)
         {
-            Console.WriteLine("No opening video found in assets; skipping to the end card.");
-            _videoSkipReason = "NO OPENING VIDEO IN ASSETS";
-            EnterComingSoon();
+            Console.WriteLine("No opening video found in assets; going straight into the game.");
+            EnterPlaying();
             return;
         }
 
@@ -680,9 +659,8 @@ public class Game1 : Game
         if (_video == null)
         {
             // ffmpeg missing or refused to start: do not punish the player.
-            try { _musicInstance?.Resume(); } catch { /* not fatal */ }
-            _videoSkipReason = "VIDEO SKIPPED - FFMPEG NOT FOUND";
-            EnterComingSoon();
+            Console.WriteLine("Opening video skipped; going straight into the game.");
+            EnterPlaying();
             return;
         }
 
@@ -712,7 +690,7 @@ public class Game1 : Game
     {
         if (_video == null)
         {
-            EnterComingSoon();
+            EnterPlaying();
             return;
         }
 
@@ -727,7 +705,7 @@ public class Game1 : Game
         if (skip || _video.Finished)
         {
             StopVideo();
-            EnterComingSoon();
+            EnterPlaying();
         }
     }
 
@@ -739,36 +717,6 @@ public class Game1 : Game
         _video = null;
 
         try { _musicInstance?.Resume(); } catch { /* not fatal */ }
-    }
-
-    // ----------------------------------------------------------------- coming soon
-
-    private void EnterComingSoon()
-    {
-        _state = GameState.ComingSoon;
-        _comingSoonTimer = 0f;
-        _comingSoonSkippable = false;
-        PlayMusic();
-    }
-
-    private void UpdateComingSoon(float dt, KeyboardState kb)
-    {
-        PlayMusic();
-        _comingSoonTimer += dt;
-
-        // Short grace period so a key held down during the video does not
-        // dismiss the card instantly.
-        if (_comingSoonTimer > 0.8f) _comingSoonSkippable = true;
-
-        bool pressed = kb.GetPressedKeys().Length > 0 && _prevKeyboardState.GetPressedKeys().Length == 0;
-
-        if (_comingSoonSkippable && pressed)
-        {
-            // The card is the end of the tutorial beat: from here the player
-            // drops into the playable world.
-            StopVideo();
-            EnterPlaying();
-        }
     }
 
     private void ReturnToMenu()
@@ -819,23 +767,44 @@ public class Game1 : Game
 
         float hintSize = _baseTextSize * 0.62f;
 
-        if (!_scene.HasArt)
+        // Report exactly what was searched and what was there, which is far more
+        // useful than a generic "not found".
+        if (_scene.MissingArt.Count > 0)
         {
-            _text.DrawShadowed(_spriteBatch, "SCENE ART NOT FOUND",
-                _screenWidth / 2f, _screenHeight * 0.35f, _baseTextSize * 1.2f,
+            float y = _screenHeight * 0.10f;
+
+            _text.DrawShadowed(_spriteBatch, "MISSING ART",
+                _screenWidth / 2f, y, _baseTextSize * 1.1f,
                 new Color(220, 40, 40), true);
 
-            string[] lines =
-            {
-                "PUT THESE PNG FILES IN THE ASSETS FOLDER:",
-                "SIDE.PNG  FRONT.PNG  GROUND.PNG  WALLS.PNG  MOUNTAINS.PNG  SKY.PNG"
-            };
+            y += _baseTextSize * 1.6f;
+            _text.DrawShadowed(_spriteBatch,
+                "MISSING: " + string.Join("  ", _scene.MissingArt).ToUpperInvariant(),
+                _screenWidth / 2f, y, hintSize, new Color(230, 170, 90), true);
 
-            for (int i = 0; i < lines.Length; i++)
+            y += _baseTextSize * 1.5f;
+            _text.DrawShadowed(_spriteBatch, "LOOKED IN:",
+                _screenWidth / 2f, y, hintSize * 0.9f, new Color(140, 140, 140), true);
+
+            y += _baseTextSize;
+            _text.DrawShadowed(_spriteBatch, _scene.AssetPath,
+                _screenWidth / 2f, y, hintSize * 0.9f, new Color(180, 180, 180), true);
+
+            y += _baseTextSize * 1.5f;
+            _text.DrawShadowed(_spriteBatch, "IMAGES FOUND THERE:",
+                _screenWidth / 2f, y, hintSize * 0.9f, new Color(140, 140, 140), true);
+
+            y += _baseTextSize;
+            string found = _scene.FoundFiles.Count > 0
+                ? string.Join("  ", _scene.FoundFiles)
+                : "(NONE)";
+
+            // Wrap the list so a long folder listing stays on screen.
+            foreach (string line in WrapText(found, 58))
             {
-                _text.DrawShadowed(_spriteBatch, lines[i], _screenWidth / 2f,
-                    _screenHeight * (0.47f + i * 0.06f), hintSize,
-                    new Color(170, 170, 170), true);
+                _text.DrawShadowed(_spriteBatch, line, _screenWidth / 2f, y,
+                    hintSize * 0.9f, new Color(180, 180, 180), true);
+                y += _baseTextSize;
             }
         }
 
@@ -843,6 +812,30 @@ public class Game1 : Game
             "ARROWS - MOVE    SPACE - JUMP    S - CROUCH    RIGHT SHIFT - DASH    ESC - MENU",
             _screenWidth / 2f, _screenHeight - hintSize * 2f, hintSize,
             new Color(210, 210, 210), true);
+    }
+
+    /// <summary>Splits text into lines of at most maxChars, breaking on spaces.</summary>
+    private static System.Collections.Generic.List<string> WrapText(string text, int maxChars)
+    {
+        var lines = new System.Collections.Generic.List<string>();
+        string current = string.Empty;
+
+        foreach (string word in text.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (current.Length > 0 && current.Length + word.Length + 1 > maxChars)
+            {
+                lines.Add(current);
+                current = word;
+            }
+            else
+            {
+                current = current.Length == 0 ? word : current + " " + word;
+            }
+        }
+
+        if (current.Length > 0) lines.Add(current);
+        if (lines.Count == 0) lines.Add(string.Empty);
+        return lines;
     }
 
     private bool WasKeyPressed(KeyboardState current, Keys key)
@@ -874,9 +867,6 @@ public class Game1 : Game
                 break;
             case GameState.OpeningVideo:
                 DrawOpeningVideoScreen();
-                break;
-            case GameState.ComingSoon:
-                DrawComingSoonScreen();
                 break;
             case GameState.Playing:
                 DrawPlayingScreen();
@@ -1134,46 +1124,6 @@ public class Game1 : Game
         _text.DrawShadowed(_spriteBatch, "PRESS ANY KEY TO SKIP", _screenWidth / 2f,
             _screenHeight - hintSize * 2.5f, hintSize,
             WithAlpha(new Color(150, 150, 150), 0.75f * _videoFadeAlpha), true);
-    }
-
-    private void DrawComingSoonScreen()
-    {
-        _spriteBatch.Draw(_pixel, new Rectangle(0, 0, _screenWidth, _screenHeight), Color.Black);
-
-        // Ease the card in over the first half second.
-        float alpha = MathF.Min(1f, _comingSoonTimer / 0.5f);
-
-        // Saying which path got here makes the two flows distinguishable even
-        // when the opening video could not be played.
-        _text.DrawShadowed(_spriteBatch,
-            _comingSoonFromNewGame ? "A NEW STORY BEGINS" : "WELCOME BACK",
-            _screenWidth / 2f, _screenHeight * 0.36f, _baseTextSize * 0.85f,
-            WithAlpha(new Color(150, 150, 150), alpha), true);
-
-        _text.DrawShadowed(_spriteBatch, "COMING SOON", _screenWidth / 2f,
-            _screenHeight * 0.47f, _baseTextSize * 2f,
-            WithAlpha(new Color(220, 40, 40), alpha), true);
-
-        _text.DrawShadowed(_spriteBatch, "THE STORY IS STILL BEING WRITTEN",
-            _screenWidth / 2f, _screenHeight * 0.57f, _baseTextSize * 0.8f,
-            WithAlpha(new Color(170, 170, 170), alpha), true);
-
-        // Only relevant on a new run, where a video was actually expected.
-        if (_comingSoonFromNewGame && _videoSkipReason.Length > 0)
-        {
-            _text.DrawShadowed(_spriteBatch, _videoSkipReason, _screenWidth / 2f,
-                _screenHeight * 0.65f, _baseTextSize * 0.65f,
-                WithAlpha(new Color(120, 100, 60), alpha), true);
-        }
-
-        if (_comingSoonSkippable && _blinkVisible)
-        {
-            // Reuse the intro blink so the prompt feels consistent.
-            float hintSize = _baseTextSize * 0.7f;
-            _text.DrawShadowed(_spriteBatch, "PRESS ANY KEY TO RETURN", _screenWidth / 2f,
-                _screenHeight - hintSize * 3f, hintSize,
-                WithAlpha(new Color(150, 150, 150), alpha), true);
-        }
     }
 
     private string BuildVolumeBar()

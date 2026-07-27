@@ -2,6 +2,8 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using System;
+using System.Collections.Generic;
+using System.IO;
 
 namespace CreeperGame;
 
@@ -29,10 +31,46 @@ public class GameScene : IDisposable
     public Character Player => _player;
     public bool HasArt => _background.HasArt || _player.HasArt;
 
+    /// <summary>Everything that failed to load, so the game can say what is missing.</summary>
+    public List<string> MissingArt { get; } = new List<string>();
+
+    /// <summary>Absolute path that was searched, shown when art is missing.</summary>
+    public string AssetPath { get; }
+
+    /// <summary>Image files actually present in that folder.</summary>
+    public List<string> FoundFiles { get; } = new List<string>();
+
     public GameScene(GraphicsDevice device, string assetDir, int screenWidth, int screenHeight)
     {
         _background = new ParallaxBackground(device, assetDir);
         _player = new Character(device, assetDir);
+
+        AssetPath = Path.GetFullPath(assetDir);
+
+        MissingArt.AddRange(_background.MissingLayers);
+        if (!_player.HasArt) MissingArt.Add("side");
+
+        // List what is really there, which is the fastest way to spot a wrong
+        // folder or a misspelled file name.
+        try
+        {
+            foreach (string file in Directory.GetFiles(AssetPath))
+            {
+                string ext = Path.GetExtension(file).ToLowerInvariant();
+                if (ext is ".png" or ".jpg" or ".jpeg" or ".bmp")
+                {
+                    FoundFiles.Add(Path.GetFileName(file));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Could not list the assets folder: {ex.Message}");
+        }
+
+        Console.WriteLine($"Scene assets: {AssetPath}");
+        Console.WriteLine($"  images present: {(FoundFiles.Count > 0 ? string.Join(", ", FoundFiles) : "none")}");
+        Console.WriteLine($"  missing: {(MissingArt.Count > 0 ? string.Join(", ", MissingArt) : "nothing")}");
 
         Resize(screenWidth, screenHeight);
 

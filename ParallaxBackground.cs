@@ -55,6 +55,9 @@ public class ParallaxBackground : IDisposable
     /// <summary>True when at least one layer loaded.</summary>
     public bool HasArt => _layers.Count > 0;
 
+    /// <summary>Layer names that could not be found, for the on-screen report.</summary>
+    public List<string> MissingLayers { get; } = new List<string>();
+
     public ParallaxBackground(GraphicsDevice device, string assetDir)
     {
         // Furthest away first, so the draw order is back to front.
@@ -63,7 +66,8 @@ public class ParallaxBackground : IDisposable
 
         Texture2D? sky = TextureLoader.LoadAny(device, assetDir,
             new[] { "sky", "background", "bg_sky" }, true);
-        if (sky != null)
+        if (sky == null) MissingLayers.Add("sky");
+        else
         {
             // Barely moves: the sky is effectively at infinity.
             _layers.Add(new ParallaxLayer(sky, 0.05f, 1.0f, 1.0f, Color.White));
@@ -71,7 +75,8 @@ public class ParallaxBackground : IDisposable
 
         Texture2D? mountains = TextureLoader.LoadAny(device, assetDir,
             new[] { "mountains", "mountain", "bg_mountains" }, true);
-        if (mountains != null)
+        if (mountains == null) MissingLayers.Add("mountains");
+        else
         {
             // Dimmed slightly so it recedes behind the walls.
             _layers.Add(new ParallaxLayer(mountains, 0.20f, 0.88f, 0.52f,
@@ -80,7 +85,8 @@ public class ParallaxBackground : IDisposable
 
         Texture2D? walls = TextureLoader.LoadAny(device, assetDir,
             new[] { "walls", "wall", "ruins", "bg_walls" }, true);
-        if (walls != null)
+        if (walls == null) MissingLayers.Add("walls");
+        else
         {
             _layers.Add(new ParallaxLayer(walls, 0.45f, 0.86f, 0.42f,
                 new Color(225, 225, 235)));
@@ -88,7 +94,8 @@ public class ParallaxBackground : IDisposable
 
         Texture2D? ground = TextureLoader.LoadAny(device, assetDir,
             new[] { "ground", "floor", "bg_ground" }, true);
-        if (ground != null)
+        if (ground == null) MissingLayers.Add("ground");
+        else
         {
             // The ground is the play surface, so it tracks the camera exactly.
             _layers.Add(new ParallaxLayer(ground, 1.0f, 1.0f, 0.26f, Color.White));
