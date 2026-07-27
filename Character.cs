@@ -1,5 +1,6 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using CreeperGame.Art;
 using System;
 
 namespace CreeperGame;
@@ -46,34 +47,19 @@ public class Character : IDisposable
     private const float CoyoteTime = 0.10f;
     private const float JumpBufferTime = 0.12f;
 
-    // ---- sheet layout ------------------------------------------------------
-    // Must match the export in design/knight.py.
+    // ---- art ---------------------------------------------------------------
 
-    private const int FrameWidth = 110;
-    private const int FrameHeight = 114;
-
-    /// <summary>Where the feet sit inside a frame.</summary>
-    private const int FootX = 60;
-    private const int FootY = 106;
-
-    /// <summary>Height of the knight in art pixels, used to pick the draw scale.</summary>
+    /// <summary>
+    /// Height of the knight in art pixels. Frames are drawn at whole-number
+    /// multiples of this, so the pixel grid is never broken.
+    /// </summary>
     private const int ArtHeight = 100;
 
-    private const int IdleStart = 0, IdleCount = 4;
-    private const int WalkStart = 4, WalkCount = 8;
-    private const int CrouchFrame = 12;
-    private const int JumpFrame = 13;
-    private const int FallFrame = 14;
-    private const int DashFrame = 15;
+    private readonly KnightSheet _sheet;
 
-    // ---- resources ---------------------------------------------------------
-
-    private readonly Texture2D? _sheet;
-    private readonly Rectangle[] _frames;
+    /// <summary>The baked frames, exposed so the inspector can display them.</summary>
+    public KnightSheet Sheet => _sheet;
     private readonly Texture2D _shadow;
-
-    /// <summary>Fallback box used when the sheet is missing, so the game still runs.</summary>
-    private readonly Texture2D _fallback;
 
     // ---- state -------------------------------------------------------------
 
@@ -90,7 +76,8 @@ public class Character : IDisposable
     public bool OnGround { get; private set; } = true;
     public bool IsCrouching { get; private set; }
 
-    public bool HasArt => _sheet != null;
+    /// <summary>The art is generated, so there is always something to draw.</summary>
+    public bool HasArt => true;
 
     /// <summary>Ground height in world space; set by the scene each frame.</summary>
     public float GroundY { get; set; }
@@ -116,25 +103,9 @@ public class Character : IDisposable
 
     public Character(GraphicsDevice device, string assetDir)
     {
-        _sheet = TextureLoader.Load(device, assetDir, "knight", false);
-
-        if (_sheet == null)
-        {
-            Console.WriteLine("knight.png not found; run design/knight.py to regenerate it.");
-        }
-
-        // Frame rectangles across the strip.
-        int count = _sheet != null ? Math.Max(1, _sheet.Width / FrameWidth) : 16;
-        _frames = new Rectangle[count];
-        for (int i = 0; i < count; i++)
-        {
-            _frames[i] = new Rectangle(i * FrameWidth, 0, FrameWidth, FrameHeight);
-        }
-
+        // Every frame is rasterised and shaded here, once, at startup.
+        _sheet = new KnightSheet(device);
         _shadow = CreateShadowTexture(device, 64);
-
-        _fallback = new Texture2D(device, 1, 1);
-        _fallback.SetData(new[] { new Color(180, 60, 60) });
 
         for (int i = 0; i < _trailAge.Length; i++) _trailAge[i] = float.MaxValue;
     }
@@ -225,7 +196,7 @@ public class Character : IDisposable
             _trail[_trailIndex] = Position;
             _trailAge[_trailIndex] = 0f;
             _trailFacing[_trailIndex] = FacingSign;
-            _trailFrame[_trailIndex] = DashFrame;
+            _trailFrame[_trailIndex] = KnightPoses.DashFrame;
             _trailIndex = (_trailIndex + 1) % _trail.Length;
         }
     }
@@ -320,19 +291,19 @@ public class Character : IDisposable
         switch (State)
         {
             case CharacterState.Walk:
-                return WalkStart + Wrap((int)_animTime, WalkCount);
+                return KnightPoses.WalkStart + Wrap((int)_animTime, KnightPoses.WalkFrames);
             case CharacterState.Idle:
-                return IdleStart + Wrap((int)_animTime, IdleCount);
+                return KnightPoses.IdleStart + Wrap((int)_animTime, KnightPoses.IdleFrames);
             case CharacterState.Crouch:
-                return CrouchFrame;
+                return KnightPoses.CrouchFrame;
             case CharacterState.Jump:
-                return JumpFrame;
+                return KnightPoses.JumpFrame;
             case CharacterState.Fall:
-                return FallFrame;
+                return KnightPoses.FallFrame;
             case CharacterState.Dash:
-                return DashFrame;
+                return KnightPoses.DashFrame;
             default:
-                return IdleStart;
+                return KnightPoses.IdleStart;
         }
     }
 
@@ -364,16 +335,6 @@ public class Character : IDisposable
                 (int)shadowWidth,
                 (int)shadowHeight),
             Color.White * shadowAlpha);
-
-        if (_sheet == null)
-        {
-            // Still show something solid so the scene is testable.
-            int w = 20 * scale, h = ArtHeight * scale;
-            spriteBatch.Draw(_fallback,
-                new Rectangle((int)screenXf - w / 2, (int)Position.Y - h, w, h),
-                Color.White);
-            return;
-        }
 
         // ---- ghost trail, drawn behind the knight ----
 
@@ -407,21 +368,18 @@ public class Character : IDisposable
     private void DrawFrame(SpriteBatch spriteBatch, int frame, int footX, int footY,
         int scale, bool flip, Color tint)
     {
-        if (_sheet == null) return;
-
-        frame = Math.Clamp(frame, 0, _frames.Length - 1);
-        Rectangle source = _frames[frame];
+        Rectangle source = _sheet.Source(frame);
 
         // Mirroring reflects the anchor across the frame, so the feet stay put.
-        int anchorX = flip ? FrameWidth - FootX : FootX;
+        int anchorX = flip ? _sheet.FrameWidth - _sheet.FootX : _sheet.FootX;
 
         var destination = new Rectangle(
             footX - anchorX * scale,
-            footY - FootY * scale,
-            FrameWidth * scale,
-            FrameHeight * scale);
+            footY - _sheet.FootY * scale,
+            _sheet.FrameWidth * scale,
+            _sheet.FrameHeight * scale);
 
-        spriteBatch.Draw(_sheet, destination, source, tint, 0f, Vector2.Zero,
+        spriteBatch.Draw(_sheet.Texture, destination, source, tint, 0f, Vector2.Zero,
             flip ? SpriteEffects.FlipHorizontally : SpriteEffects.None, 0f);
     }
 
@@ -429,6 +387,5 @@ public class Character : IDisposable
     {
         _sheet?.Dispose();
         _shadow?.Dispose();
-        _fallback?.Dispose();
     }
 }

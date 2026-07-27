@@ -1,3 +1,4 @@
+using CreeperGame.Art;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Audio;
 using Microsoft.Xna.Framework.Graphics;
@@ -15,7 +16,8 @@ public enum GameState
     MainMenu,
     FileSelect,
     OpeningVideo,
-    Playing
+    Playing,
+    SpriteInspector
 }
 
 public enum MenuOption
@@ -81,6 +83,9 @@ public class Game1 : Game
 
     // The playable side-scrolling scene, entered from a save slot
     private GameScene? _scene;
+
+    // Frame-by-frame view of the character art, reachable with F2
+    private SheetInspector? _inspector;
 
     // Text rendering (TrueType from assets, pixel font fallback)
     private TextRenderer _text = null!;
@@ -335,6 +340,22 @@ public class Game1 : Game
             else EnterPlaying();
         }
 
+        // F2 opens the sprite inspector, which needs the scene to exist first.
+        if (WasKeyPressed(kb, Keys.F2))
+        {
+            PlayClick();
+            if (_state == GameState.SpriteInspector)
+            {
+                _state = GameState.Playing;
+            }
+            else
+            {
+                EnterPlaying();
+                _inspector ??= new SheetInspector(_scene!.Player.Sheet, _pixel);
+                _state = GameState.SpriteInspector;
+            }
+        }
+
         if (_toastTimer > 0f) _toastTimer -= dt;
 
         // Shared blink used by the intro prompt and the coming-soon card.
@@ -368,6 +389,12 @@ public class Game1 : Game
             case GameState.Playing:
                 UpdatePlaying(dt, kb);
                 break;
+            case GameState.SpriteInspector:
+                _inspector?.Update(dt,
+                    WasKeyPressed(kb, Keys.Right) || WasKeyPressed(kb, Keys.D),
+                    WasKeyPressed(kb, Keys.Left) || WasKeyPressed(kb, Keys.A),
+                    WasKeyPressed(kb, Keys.Tab));
+                break;
         }
 
         _prevKeyboardState = kb;
@@ -399,6 +426,11 @@ public class Game1 : Game
 
             case GameState.Playing:
                 LeavePlaying();
+                break;
+
+            case GameState.SpriteInspector:
+                PlayClick();
+                _state = GameState.Playing;
                 break;
 
             default:
@@ -870,6 +902,9 @@ public class Game1 : Game
                 break;
             case GameState.Playing:
                 DrawPlayingScreen();
+                break;
+            case GameState.SpriteInspector:
+                _inspector?.Draw(_spriteBatch, _text, _screenWidth, _screenHeight, _baseTextSize);
                 break;
         }
 
