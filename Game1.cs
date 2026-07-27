@@ -15,7 +15,8 @@ public enum GameState
     MainMenu,
     FileSelect,
     OpeningVideo,
-    ComingSoon
+    ComingSoon,
+    CharacterTest
 }
 
 public enum MenuOption
@@ -88,6 +89,9 @@ public class Game1 : Game
 
     /// <summary>Why the opening video did not play, shown on the card. Empty when it did.</summary>
     private string _videoSkipReason = string.Empty;
+
+    // Character turnaround preview, reachable with F1
+    private Character? _character;
 
     // Text rendering (TrueType from assets, pixel font fallback)
     private TextRenderer _text = null!;
@@ -170,6 +174,11 @@ public class Game1 : Game
         _text = new TextRenderer(GraphicsDevice, _assetDir);
 
         _saves = new SaveSlots(_assetDir);
+
+        // Looks for char_front / char_back / char_side in the assets folder.
+        _character = new Character(GraphicsDevice, _assetDir);
+        _character.DisplayHeight = _screenHeight * 0.34f;
+        _character.Position = new Vector2(_screenWidth / 2f, _screenHeight * 0.72f);
 
         LoadAssets(_assetDir);
     }
@@ -334,6 +343,13 @@ public class Game1 : Game
             ToggleFullscreen();
         }
 
+        // F1 opens the character preview from anywhere, for checking the art.
+        if (WasKeyPressed(kb, Keys.F1))
+        {
+            PlayClick();
+            _state = _state == GameState.CharacterTest ? GameState.MainMenu : GameState.CharacterTest;
+        }
+
         if (_toastTimer > 0f) _toastTimer -= dt;
 
         // Shared blink used by the intro prompt and the coming-soon card.
@@ -367,6 +383,9 @@ public class Game1 : Game
             case GameState.ComingSoon:
                 UpdateComingSoon(dt, kb);
                 break;
+            case GameState.CharacterTest:
+                UpdateCharacterTest(dt, kb);
+                break;
         }
 
         _prevKeyboardState = kb;
@@ -398,6 +417,11 @@ public class Game1 : Game
 
             case GameState.ComingSoon:
                 ReturnToMenu();
+                break;
+
+            case GameState.CharacterTest:
+                PlayClick();
+                _state = GameState.MainMenu;
                 break;
 
             default:
@@ -755,6 +779,94 @@ public class Game1 : Game
         _state = GameState.MainMenu;
     }
 
+    // ------------------------------------------------------------ character test
+
+    private void UpdateCharacterTest(float dt, KeyboardState kb)
+    {
+        PlayMusic();
+        if (_character == null) return;
+
+        var input = Vector2.Zero;
+        if (kb.IsKeyDown(Keys.Left) || kb.IsKeyDown(Keys.A)) input.X -= 1f;
+        if (kb.IsKeyDown(Keys.Right) || kb.IsKeyDown(Keys.D)) input.X += 1f;
+        if (kb.IsKeyDown(Keys.Up) || kb.IsKeyDown(Keys.W)) input.Y -= 1f;
+        if (kb.IsKeyDown(Keys.Down) || kb.IsKeyDown(Keys.S)) input.Y += 1f;
+
+        // Keep the feet on the floor strip rather than the whole screen.
+        var bounds = new Rectangle(
+            (int)(_screenWidth * 0.08f),
+            (int)(_screenHeight * 0.45f),
+            (int)(_screenWidth * 0.84f),
+            (int)(_screenHeight * 0.45f));
+
+        _character.Update(dt, input, bounds);
+
+        // Resize the character on the fly to find a scale that feels right.
+        if (kb.IsKeyDown(Keys.OemPlus) || kb.IsKeyDown(Keys.Add))
+        {
+            _character.DisplayHeight = MathF.Min(_screenHeight * 0.9f, _character.DisplayHeight + 120f * dt);
+        }
+        if (kb.IsKeyDown(Keys.OemMinus) || kb.IsKeyDown(Keys.Subtract))
+        {
+            _character.DisplayHeight = MathF.Max(40f, _character.DisplayHeight - 120f * dt);
+        }
+    }
+
+    private void DrawCharacterTestScreen()
+    {
+        // Flat backdrop so the sprite edges and any stray matte are obvious.
+        _spriteBatch.Draw(_pixel, new Rectangle(0, 0, _screenWidth, _screenHeight), new Color(28, 26, 34));
+
+        // Horizon line marking where the feet are allowed to go.
+        int horizon = (int)(_screenHeight * 0.45f);
+        _spriteBatch.Draw(_pixel, new Rectangle(0, horizon, _screenWidth, _screenHeight - horizon),
+            new Color(38, 36, 46));
+        _spriteBatch.Draw(_pixel, new Rectangle(0, horizon, _screenWidth, 2), new Color(60, 58, 70));
+
+        float hintSize = _baseTextSize * 0.7f;
+
+        if (_character is { HasArt: true })
+        {
+            _character.Draw(_spriteBatch);
+
+            _text.DrawShadowed(_spriteBatch, $"FACING: {_character.Facing}".ToUpperInvariant(),
+                _screenWidth / 2f, _screenHeight * 0.08f, _baseTextSize * 0.9f,
+                new Color(200, 200, 200), true);
+
+            if (_character.MissingViews.Count > 0)
+            {
+                _text.DrawShadowed(_spriteBatch,
+                    "MISSING: " + string.Join(", ", _character.MissingViews).ToUpperInvariant(),
+                    _screenWidth / 2f, _screenHeight * 0.14f, hintSize,
+                    new Color(200, 150, 60), true);
+            }
+
+            _text.DrawShadowed(_spriteBatch, "ARROWS - WALK    + / - RESIZE    F1 OR ESC - BACK",
+                _screenWidth / 2f, _screenHeight - hintSize * 2.5f, hintSize,
+                new Color(150, 150, 150), true);
+        }
+        else
+        {
+            _text.DrawShadowed(_spriteBatch, "NO CHARACTER ART FOUND",
+                _screenWidth / 2f, _screenHeight * 0.4f, _baseTextSize * 1.2f,
+                new Color(220, 40, 40), true);
+
+            string[] lines =
+            {
+                "PUT THESE PNG FILES IN THE ASSETS FOLDER:",
+                "CHAR_FRONT.PNG    CHAR_BACK.PNG    CHAR_SIDE.PNG",
+                "TRANSPARENT BACKGROUND, FACING RIGHT FOR THE SIDE VIEW"
+            };
+
+            for (int i = 0; i < lines.Length; i++)
+            {
+                _text.DrawShadowed(_spriteBatch, lines[i], _screenWidth / 2f,
+                    _screenHeight * (0.52f + i * 0.06f), hintSize,
+                    new Color(160, 160, 160), true);
+            }
+        }
+    }
+
     private bool WasKeyPressed(KeyboardState current, Keys key)
         => current.IsKeyDown(key) && _prevKeyboardState.IsKeyUp(key);
 
@@ -787,6 +899,9 @@ public class Game1 : Game
                 break;
             case GameState.ComingSoon:
                 DrawComingSoonScreen();
+                break;
+            case GameState.CharacterTest:
+                DrawCharacterTestScreen();
                 break;
         }
 
@@ -1101,6 +1216,7 @@ public class Game1 : Game
 
     protected override void UnloadContent()
     {
+        _character?.Dispose();
         _video?.Dispose();
         _musicInstance?.Stop();
         _musicInstance?.Dispose();
