@@ -69,8 +69,8 @@ public static class KnightFigure
         var shoulder = new Point(hipX + lean, hipY - 22);
 
         // Back to front.
-        DrawWing(c, shoulder, pose);
         DrawCape(c, shoulder, pose);
+        DrawWing(c, shoulder, pose);
         DrawLimb(c, hip, pose.HipFar, pose.KneeFar, pose.AnkleFar, -2, false, true, out _);
         DrawLimb(c, shoulder, pose.ShoulderFar, pose.ElbowFar, 0, -3, false, false, out _);
         DrawTorso(c, hip, shoulder, pose);
@@ -223,7 +223,10 @@ public static class KnightFigure
     private static void DrawPauldron(PixelCanvas c, Point shoulder)
     {
         int w = ArtWidth(KnightArt.Pauldron);
-        Stamp(c, KnightArt.Pauldron, shoulder.X - w / 2 + 2, shoulder.Y - 1);
+
+        // Sits over the shoulder joint at the top of the arm. Centring it on the
+        // torso instead made it read as a boss on the chest.
+        Stamp(c, KnightArt.Pauldron, shoulder.X - w / 2 + 4, shoulder.Y - 4);
     }
 
     // ==================================================================== wing
@@ -237,9 +240,14 @@ public static class KnightFigure
 
         int w = ArtWidth(art);
 
-        // Anchored at the shoulder blade. The art is drawn with its root at the
-        // lower right, so the stamp is offset left by almost the full width.
-        Stamp(c, art, shoulder.X - w + 8, shoulder.Y - 20);
+        // A folded wing hangs down the back from the shoulder blade, root at the
+        // art's top right.
+        //
+        // The torso is 18 wide and centred on the shoulder, so it covers roughly
+        // shoulder.X-9 to shoulder.X+9. Anything stamped inside that range is
+        // painted over by the torso, which is exactly why earlier placements made
+        // the wing vanish. Its right edge therefore has to land left of -9.
+        Stamp(c, art, shoulder.X - w - 5, shoulder.Y - 8);
     }
 
     // ==================================================================== cape
@@ -253,9 +261,10 @@ public static class KnightFigure
 
         int w = ArtWidth(art);
 
-        // Hangs from the collar. Offset back so the torso covers its front edge
-        // and it reads as being behind the body rather than beside it.
-        Stamp(c, art, shoulder.X - w + 7, shoulder.Y - 2);
+        // Hangs from the collar and trails back. Like the wing it has to clear
+        // the torso's left edge, but it tucks a few columns further in so the
+        // collar still reads as attached at the neck.
+        Stamp(c, art, shoulder.X - w + 2, shoulder.Y - 4);
     }
 
     // =================================================================== sword

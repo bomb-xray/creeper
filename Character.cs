@@ -272,10 +272,18 @@ public class Character : IDisposable
         // The walk cycle is driven by real speed, so the feet never slide.
         float speedRatio = MathF.Abs(Velocity.X) / WalkSpeed;
 
+        // Rates are per-frame, so they scale with the frame counts in
+        // KnightPoses: a full walk cycle should take about the same wall time
+        // regardless of how finely it is sampled.
         _animTime += State switch
         {
-            CharacterState.Walk => dt * 11f * MathF.Max(0.45f, speedRatio),
-            CharacterState.Idle => dt * 4.5f,
+            // Roughly 1.4 cycles a second at full speed.
+            CharacterState.Walk =>
+                dt * KnightPoses.WalkFrames * 1.4f * MathF.Max(0.45f, speedRatio),
+
+            // A slow breath, one cycle every three seconds or so.
+            CharacterState.Idle => dt * KnightPoses.IdleFrames * 0.33f,
+
             _ => dt * 6f
         };
 

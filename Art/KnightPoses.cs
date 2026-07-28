@@ -8,8 +8,8 @@ namespace CreeperGame.Art;
 /// </summary>
 public static class KnightPoses
 {
-    public const int IdleFrames = 4;
-    public const int WalkFrames = 8;
+    public const int IdleFrames = 6;
+    public const int WalkFrames = 12;
 
     public const int IdleStart = 0;
     public const int WalkStart = IdleFrames;
@@ -28,6 +28,10 @@ public static class KnightPoses
     {
         float a = phase * MathF.PI * 2f;
         float breathe = MathF.Sin(a);
+
+        // The head and the sword settle a beat behind the chest, so the whole
+        // figure does not pulse as one rigid block.
+        float lag = MathF.Sin(a - 0.7f);
 
         return new Pose
         {
@@ -49,56 +53,92 @@ public static class KnightPoses
             Lean = 1,
             BodyY = -breathe * 0.6f,
             BodyX = 0,
-            HeadTilt = breathe,
+            HeadTilt = lag * 1.2f,
 
             CapeSway = 0.12f + breathe * 0.04f,
             WingOpen = 0.05f + breathe * 0.04f,
-            SwordAngle = 12 + breathe * 2f
+            SwordAngle = 12 + lag * 2.5f
         };
     }
 
     /// <summary>
     /// Walking. Phase 0 is the near-foot contact; the far leg runs half a cycle
-    /// behind. Knees bend only on the recovery half, which is what stops the
-    /// gait looking like wading.
+    /// behind.
+    ///
+    /// The previous cycle used max(0, -cos) to drive the knees, which has a hard
+    /// corner where it meets zero: the leg snapped straight at exactly the same
+    /// instant every stride, and that discontinuity is what made the walk look
+    /// stiff. Every curve here is smooth across the whole loop instead, and the
+    /// phases are offset so the joints do not all peak together -- a knee lags
+    /// its hip, an ankle lags its knee. That lag is most of what reads as weight.
     /// </summary>
     public static Pose Walk(float phase)
     {
         float a = phase * MathF.PI * 2f;
 
-        float swingNear = MathF.Sin(a);
-        float swingFar = MathF.Sin(a + MathF.PI);
+        // Hip swing. A touch of second harmonic makes the forward reach quicker
+        // than the backward push, which is how a real stride is shaped.
+        float hipNear = MathF.Sin(a) + MathF.Sin(a * 2f) * 0.12f;
+        float hipFar = MathF.Sin(a + MathF.PI) + MathF.Sin((a + MathF.PI) * 2f) * 0.12f;
 
-        float liftNear = MathF.Max(0f, -MathF.Cos(a));
-        float liftFar = MathF.Max(0f, -MathF.Cos(a + MathF.PI));
+        // Knee bend, smooth everywhere. Peaks a little after the hip swings back,
+        // so the shin trails the thigh instead of moving with it.
+        float kneeNear = Fold(a - 0.55f);
+        float kneeFar = Fold(a + MathF.PI - 0.55f);
+
+        // Ankle, lagging the knee again.
+        float ankleNear = Fold(a - 1.1f);
+        float ankleFar = Fold(a + MathF.PI - 1.1f);
 
         return new Pose
         {
-            HipNear = swingNear * 24f,
-            KneeNear = -(liftNear * 46f + 4f),
-            AnkleNear = liftNear * 20f + swingNear * 6f,
+            HipNear = hipNear * 26f,
+            KneeNear = -(kneeNear * 52f + 5f),
+            AnkleNear = ankleNear * 22f - hipNear * 5f,
 
-            HipFar = swingFar * 24f,
-            KneeFar = -(liftFar * 46f + 4f),
-            AnkleFar = liftFar * 20f + swingFar * 6f,
+            HipFar = hipFar * 26f,
+            KneeFar = -(kneeFar * 52f + 5f),
+            AnkleFar = ankleFar * 22f - hipFar * 5f,
 
-            // The sword arm stays heavy and mostly still; the free arm swings.
-            ShoulderNear = 14 - swingNear * 6f,
-            ElbowNear = 16 + liftNear * 4f,
+            // The sword arm is heavy: it barely swings, it just rides the body.
+            ShoulderNear = 14f - hipNear * 5f,
+            ElbowNear = 16f + kneeNear * 5f,
 
-            ShoulderFar = -8 + swingFar * 18f,
-            ElbowFar = 14 + liftFar * 12f,
+            // The free arm counter-swings against its own leg.
+            ShoulderFar = -8f + hipFar * 20f,
+            ElbowFar = 14f + kneeFar * 14f,
 
-            Lean = 4,
-            // Two dips per cycle, at each push-off.
-            BodyY = -MathF.Abs(swingNear) * 1.5f,
-            BodyX = 0,
-            HeadTilt = -swingNear * 1.5f,
+            Lean = 4f,
 
-            CapeSway = 0.5f + liftNear * 0.1f,
-            WingOpen = 0.1f,
-            SwordAngle = 12 - swingNear * 4f
+            // The body rises over each supporting leg and dips at the pass, so
+            // it bobs twice per cycle. Cosine of double the phase gives that
+            // without the kink an absolute value would introduce.
+            BodyY = -0.9f - MathF.Cos(a * 2f) * 1.4f,
+            BodyX = 0f,
+
+            // The head counters the body, which keeps it level -- people do this
+            // instinctively and its absence is very noticeable.
+            HeadTilt = -hipNear * 1.6f + MathF.Cos(a * 2f) * 0.8f,
+
+            CapeSway = 0.5f + kneeNear * 0.12f,
+            WingOpen = 0.1f + kneeNear * 0.04f,
+            SwordAngle = 12f - hipNear * 3f
         };
+    }
+
+    /// <summary>
+    /// A smooth 0..1 bump peaking once per cycle, used for joints that fold.
+    ///
+    /// Unlike max(0, -cos) this has no corner, so the joint eases into and out of
+    /// its bend rather than snapping straight.
+    /// </summary>
+    private static float Fold(float angle)
+    {
+        // (1 - cos) / 2 is a raised cosine: smooth, and exactly zero at its
+        // minimum. Squaring biases the bend towards the lift, which is where a
+        // real knee spends its travel.
+        float raised = (1f - MathF.Cos(angle)) * 0.5f;
+        return raised * raised;
     }
 
     public static Pose Crouch() => new Pose
