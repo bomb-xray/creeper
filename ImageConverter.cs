@@ -2,98 +2,93 @@ using System;
 using System.IO;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Png;
+using SixLabors.ImageSharp.PixelFormats;
 
 namespace CreeperGame;
 
 /// <summary>
-/// Converts unsupported image formats to PNG for Raylib compatibility.
+/// Re-encodes images to plain 32-bit PNG. Progressive/CMYK JPEGs and some exotic
+/// PNG variants fail to load in the graphics backend, so they are converted once
+/// and the result is cached next to the original file.
 /// </summary>
 public static class ImageConverter
 {
+    /// <summary>Formats the graphics backend loads reliably as-is.</summary>
+    private static readonly string[] SafeFormats = { ".png", ".bmp" };
+
+    /// <summary>Formats that are re-encoded before use.</summary>
+    private static readonly string[] RiskyFormats = { ".jpg", ".jpeg", ".gif", ".tga", ".webp", ".tif", ".tiff" };
+
     /// <summary>
-    /// Converts any supported image format to PNG.
+    /// Returns a path to an image named <paramref name="baseName"/> that is safe to load.
     /// </summary>
-    /// <param name="inputPath">Path to the source image</param>
-    /// <param name="outputPath">Path where PNG file will be saved</param>
-    /// <returns>True if conversion successful</returns>
+    public static string? EnsureLoadableImage(string dir, string baseName)
+    {
+        if (!Directory.Exists(dir)) return null;
+
+        foreach (string ext in SafeFormats)
+        {
+            string path = Path.Combine(dir, baseName + ext);
+            if (File.Exists(path)) return path;
+        }
+
+        foreach (string ext in RiskyFormats)
+        {
+            string inputPath = Path.Combine(dir, baseName + ext);
+            if (!File.Exists(inputPath)) continue;
+
+            string outputPath = Path.Combine(dir, baseName + "_converted.png");
+
+            if (File.Exists(outputPath) &&
+                File.GetLastWriteTimeUtc(outputPath) >= File.GetLastWriteTimeUtc(inputPath))
+            {
+                Console.WriteLine($"Using cached image conversion: {outputPath}");
+                return outputPath;
+            }
+
+            Console.WriteLine($"Image format needs conversion: {inputPath}");
+            if (ConvertToPng(inputPath, outputPath)) return outputPath;
+
+            // Conversion failed; hand back the original and let the caller try.
+            return inputPath;
+        }
+
+        return null;
+    }
+
+    /// <summary>Re-encodes any ImageSharp-readable file as a 32-bit RGBA PNG.</summary>
     public static bool ConvertToPng(string inputPath, string outputPath)
     {
         try
         {
             Console.WriteLine($"Converting image: {inputPath} -> {outputPath}");
-            
-            using (var image = Image.Load(inputPath))
+
+            using var image = Image.Load<Rgba32>(inputPath);
+
+            var encoder = new PngEncoder
             {
-                // Save as PNG with optimal compression
-                var encoder = new PngEncoder
-                {
-                    CompressionLevel = PngCompressionLevel.BestSpeed,
-                    FilterMethod = PngFilterMethod.Adaptive
-                };
-                
-                image.Save(outputPath, encoder);
-            }
-            
-            Console.WriteLine($"  -> Conversion successful!");
+                ColorType = PngColorType.RgbWithAlpha,
+                BitDepth = PngBitDepth.Bit8,
+                CompressionLevel = PngCompressionLevel.BestSpeed
+            };
+
+            image.Save(outputPath, encoder);
+
+            Console.WriteLine($"  -> image conversion OK ({image.Width}x{image.Height})");
             return true;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"  -> Conversion failed: {ex.Message}");
+            Console.WriteLine($"  -> image conversion failed: {ex.Message}");
+            try
+            {
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+            }
+            catch
+            {
+                // Ignored.
+            }
             return false;
         }
-    }
-
-    /// <summary>
-    /// Ensures an image file is in a format Raylib can load.
-    /// If the original format fails, converts to PNG.
-    /// </summary>
-    /// <param name="dir">Directory to search</param>
-    /// <param name="baseName">Base filename without extension</param>
-    /// <returns>Path to a loadable image file</returns>
-    public static string EnsureLoadableImage(string dir, string baseName)
-    {
-        // Formats Raylib definitely supports
-        string[] raylibNative = { ".png", ".bmp", ".tga" };
-        
-        // Formats that might have issues
-        string[] problematicFormats = { ".jpg", ".jpeg", ".gif" };
-        
-        // First, check native formats
-        foreach (string ext in raylibNative)
-        {
-            string path = Path.Combine(dir, baseName + ext);
-            if (File.Exists(path))
-            {
-                return path;
-            }
-        }
-        
-        // Check problematic formats and convert if needed
-        foreach (string ext in problematicFormats)
-        {
-            string inputPath = Path.Combine(dir, baseName + ext);
-            if (File.Exists(inputPath))
-            {
-                string convertedPath = Path.Combine(dir, baseName + "_converted.png");
-                
-                // Check if already converted
-                if (File.Exists(convertedPath))
-                {
-                    Console.WriteLine($"  -> Using cached conversion: {convertedPath}");
-                    return convertedPath;
-                }
-                
-                // Convert
-                Console.WriteLine($"Found potentially problematic format: {inputPath}");
-                if (ConvertToPng(inputPath, convertedPath))
-                {
-                    return convertedPath;
-                }
-            }
-        }
-        
-        // No image found
-        return null;
     }
 }
