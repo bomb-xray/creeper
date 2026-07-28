@@ -53,7 +53,7 @@ public class Character : IDisposable
     /// Height of the knight in art pixels. Frames are drawn at whole-number
     /// multiples of this, so the pixel grid is never broken.
     /// </summary>
-    private const int ArtHeight = PenitentRig.FigureHeight;
+    private const int ArtHeight = KnightFigure.FigureHeight;
 
     private readonly CharacterSheet _sheet;
 
@@ -196,7 +196,7 @@ public class Character : IDisposable
             _trail[_trailIndex] = Position;
             _trailAge[_trailIndex] = 0f;
             _trailFacing[_trailIndex] = FacingSign;
-            _trailFrame[_trailIndex] = PenitentPoses.DashFrame;
+            _trailFrame[_trailIndex] = KnightPoses.DashFrame;
             _trailIndex = (_trailIndex + 1) % _trail.Length;
         }
     }
@@ -291,19 +291,19 @@ public class Character : IDisposable
         switch (State)
         {
             case CharacterState.Walk:
-                return PenitentPoses.WalkStart + Wrap((int)_animTime, PenitentPoses.WalkFrames);
+                return KnightPoses.WalkStart + Wrap((int)_animTime, KnightPoses.WalkFrames);
             case CharacterState.Idle:
-                return PenitentPoses.IdleStart + Wrap((int)_animTime, PenitentPoses.IdleFrames);
+                return KnightPoses.IdleStart + Wrap((int)_animTime, KnightPoses.IdleFrames);
             case CharacterState.Crouch:
-                return PenitentPoses.CrouchFrame;
+                return KnightPoses.CrouchFrame;
             case CharacterState.Jump:
-                return PenitentPoses.JumpFrame;
+                return KnightPoses.JumpFrame;
             case CharacterState.Fall:
-                return PenitentPoses.FallFrame;
+                return KnightPoses.FallFrame;
             case CharacterState.Dash:
-                return PenitentPoses.DashFrame;
+                return KnightPoses.DashFrame;
             default:
-                return PenitentPoses.IdleStart;
+                return KnightPoses.IdleStart;
         }
     }
 

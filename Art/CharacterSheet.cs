@@ -33,10 +33,10 @@ public sealed class CharacterSheet : IDisposable
     {
         var timer = Stopwatch.StartNew();
 
-        FrameCount = PenitentPoses.TotalFrames;
+        FrameCount = KnightPoses.TotalFrames;
 
-        int canvasW = PenitentRig.CanvasWidth;
-        int canvasH = PenitentRig.CanvasHeight;
+        int canvasW = KnightFigure.CanvasWidth;
+        int canvasH = KnightFigure.CanvasHeight;
 
         // Render every pose first, so the union of used area can be measured
         // before committing to a frame size.
@@ -45,7 +45,7 @@ public sealed class CharacterSheet : IDisposable
 
         for (int i = 0; i < FrameCount; i++)
         {
-            PixelCanvas canvas = PenitentRig.Build(PenitentPoses.ForFrame(i));
+            PixelCanvas canvas = KnightFigure.Build(KnightPoses.ForFrame(i));
             rendered[i] = canvas.ToArray();
 
             Rectangle bounds = canvas.UsedBounds();
@@ -67,8 +67,8 @@ public sealed class CharacterSheet : IDisposable
 
         // A shared crop box keeps every frame registered to the same origin, so
         // the figure does not jitter between poses.
-        FootX = (int)(PenitentRig.CanvasWidth / 2f) - minX;
-        FootY = PenitentRig.GroundY - minY;
+        FootX = (int)(KnightFigure.CanvasWidth / 2f) - minX;
+        FootY = KnightFigure.GroundY - minY;
 
         int sheetWidth = FrameWidth * FrameCount;
         var sheet = new Color[sheetWidth * FrameHeight];

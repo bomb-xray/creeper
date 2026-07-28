@@ -6,7 +6,7 @@ namespace CreeperGame.Art;
 /// The pose library. Cyclic actions are functions of phase so frame counts can
 /// be changed by editing one number; one-off actions are explicit key poses.
 /// </summary>
-public static class PenitentPoses
+public static class KnightPoses
 {
     public const int IdleFrames = 4;
     public const int WalkFrames = 8;
@@ -52,6 +52,7 @@ public static class PenitentPoses
             HeadTilt = breathe,
 
             CapeSway = 0.12f + breathe * 0.04f,
+            WingOpen = 0.05f + breathe * 0.04f,
             SwordAngle = 12 + breathe * 2f
         };
     }
@@ -95,6 +96,7 @@ public static class PenitentPoses
             HeadTilt = -swingNear * 1.5f,
 
             CapeSway = 0.5f + liftNear * 0.1f,
+            WingOpen = 0.1f,
             SwordAngle = 12 - swingNear * 4f
         };
     }
@@ -106,7 +108,7 @@ public static class PenitentPoses
         ShoulderNear = 28, ElbowNear = 22,
         ShoulderFar = 14, ElbowFar = 30,
         Lean = 12, BodyY = 13, BodyX = -1, HeadTilt = -4,
-        CapeSway = 0.2f, SwordAngle = 26
+        CapeSway = 0.2f, WingOpen = 0f, SwordAngle = 26
     };
 
     public static Pose Jump() => new Pose
@@ -116,7 +118,7 @@ public static class PenitentPoses
         ShoulderNear = -8, ElbowNear = 10,
         ShoulderFar = 34, ElbowFar = 12,
         Lean = -4, BodyY = -2, BodyX = 0, HeadTilt = 3,
-        CapeSway = 0.9f, SwordAngle = -6
+        CapeSway = 0.9f, WingOpen = 1f, SwordAngle = -6
     };
 
     public static Pose Fall() => new Pose
@@ -126,7 +128,7 @@ public static class PenitentPoses
         ShoulderNear = 18, ElbowNear = 18,
         ShoulderFar = -28, ElbowFar = 18,
         Lean = 5, BodyY = 0, BodyX = 0, HeadTilt = -3,
-        CapeSway = 0.75f, SwordAngle = 16
+        CapeSway = 0.75f, WingOpen = 0.6f, SwordAngle = 16
     };
 
     /// <summary>A low committed lunge, cape streaming flat behind.</summary>
@@ -137,7 +139,7 @@ public static class PenitentPoses
         ShoulderNear = -18, ElbowNear = 8,
         ShoulderFar = 40, ElbowFar = 14,
         Lean = 18, BodyY = 8, BodyX = 3, HeadTilt = -6,
-        CapeSway = 1.7f, SwordAngle = -14
+        CapeSway = 1.7f, WingOpen = 0.5f, SwordAngle = -14
     };
 
     public static Pose ForFrame(int index)

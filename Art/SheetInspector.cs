@@ -112,7 +112,7 @@ public sealed class SheetInspector
 
         spriteBatch.Draw(_sheet.Texture, detailRect, _sheet.Source(_selected), Color.White);
 
-        text.DrawShadowed(spriteBatch, $"FRAME {_selected}  {PenitentPoses.FrameName(_selected)}",
+        text.DrawShadowed(spriteBatch, $"FRAME {_selected}  {KnightPoses.FrameName(_selected)}",
             detailX + detailW / 2f, detailTop + detailH + small * 1.4f, small,
             new Color(200, 200, 210), true);
 
@@ -127,8 +127,8 @@ public sealed class SheetInspector
             new Color(90, 80, 70));
 
         int liveFrame = _previewMode == 0
-            ? PenitentPoses.IdleStart + (int)(_playTime * 6f) % PenitentPoses.IdleFrames
-            : PenitentPoses.WalkStart + (int)(_playTime * 12f) % PenitentPoses.WalkFrames;
+            ? KnightPoses.IdleStart + (int)(_playTime * 6f) % KnightPoses.IdleFrames
+            : KnightPoses.WalkStart + (int)(_playTime * 12f) % KnightPoses.WalkFrames;
 
         spriteBatch.Draw(_sheet.Texture, liveRect, _sheet.Source(liveFrame), Color.White);
 
