@@ -122,7 +122,7 @@ public static class KnightPoses
 
             CapeSway = 0.5f + kneeNear * 0.12f,
             WingOpen = 0.1f + kneeNear * 0.04f,
-            SwordAngle = 12f - hipNear * 3f
+            SwordAngle = 12f - hipNear * 3f - kneeNear * 4f
         };
     }
 

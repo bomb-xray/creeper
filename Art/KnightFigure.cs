@@ -32,10 +32,10 @@ public static class KnightFigure
     public const int FigureHeight = 77;
 
     // Limb lengths in pixels.
-    private const int ThighLength = 17;
-    private const int ShinLength = 17;
-    private const int UpperArmLength = 14;
-    private const int ForearmLength = 13;
+    private const int ThighLength = 22;
+    private const int ShinLength = 22;
+    private const int UpperArmLength = 16;
+    private const int ForearmLength = 15;
 
     // Palette shortcuts for the procedural limbs, matching the drawn parts.
     private static Color Steel1 => KnightArt.Palette['1'];
@@ -62,20 +62,20 @@ public static class KnightFigure
         var c = new PixelCanvas(CanvasWidth, CanvasHeight);
 
         int hipX = CentreX + (int)MathF.Round(pose.BodyX);
-        int hipY = GroundY - 36 + (int)MathF.Round(pose.BodyY);
+        int hipY = GroundY - 46 + (int)MathF.Round(pose.BodyY);
 
         int lean = (int)MathF.Round(pose.Lean * 0.3f);
         var hip = new Point(hipX, hipY);
-        var shoulder = new Point(hipX + lean, hipY - 22);
+        var shoulder = new Point(hipX + lean, hipY - 26);
 
         // Back to front.
         DrawCape(c, shoulder, pose);
         DrawWing(c, shoulder, pose);
-        DrawLimb(c, hip, pose.HipFar, pose.KneeFar, pose.AnkleFar, -2, false, true, out _);
+        DrawLimb(c, hip, pose.HipFar, pose.KneeFar, pose.AnkleFar, -4, false, true, out _);
         DrawLimb(c, shoulder, pose.ShoulderFar, pose.ElbowFar, 0, -3, false, false, out _);
         DrawTorso(c, hip, shoulder, pose);
         DrawHead(c, shoulder, pose);
-        DrawLimb(c, hip, pose.HipNear, pose.KneeNear, pose.AnkleNear, 2, true, true, out _);
+        DrawLimb(c, hip, pose.HipNear, pose.KneeNear, pose.AnkleNear, 3, true, true, out _);
         DrawLimb(c, shoulder, pose.ShoulderNear, pose.ElbowNear, 0, 2, true, false, out Point hand);
         DrawPauldron(c, shoulder);
         DrawSword(c, hand, pose);
@@ -133,8 +133,10 @@ public static class KnightFigure
         int wMid = isLeg ? (near ? 7 : 6) : (near ? 6 : 5);
         int wEnd = isLeg ? (near ? 6 : 5) : (near ? 5 : 4);
 
-        // The far side of the body sits in shadow, one ramp step darker.
-        Color body = near ? Steel3 : Steel2;
+        // The far side of the body sits in shadow. Two ramp steps rather than
+        // one: with only a single step the legs fused into one mass whenever
+        // they overlapped, and depth separation is what keeps a walk readable.
+        Color body = near ? Steel4 : Steel2;
         Color lit = near ? Steel5 : Steel3;
         Color dark = near ? Steel2 : Steel1;
 
@@ -203,7 +205,10 @@ public static class KnightFigure
     private static void DrawTorso(PixelCanvas c, Point hip, Point shoulder, Pose pose)
     {
         int w = ArtWidth(KnightArt.Torso);
-        Stamp(c, KnightArt.Torso, shoulder.X - w / 2, shoulder.Y - 2);
+        // The torso must reach the hip: with the longer legs the shoulder sits
+        // 26 above it, and a 24-tall stamp starting two above the shoulder left
+        // a visible gap at the waist.
+        Stamp(c, KnightArt.Torso, shoulder.X - w / 2, shoulder.Y - 1);
     }
 
     // ==================================================================== head
@@ -213,8 +218,8 @@ public static class KnightFigure
         int tilt = (int)MathF.Round(pose.HeadTilt * 0.3f);
 
         // Helm sits on the shoulders; the plume overlaps its crown.
-        int helmX = shoulder.X - 10 + tilt;
-        int helmY = shoulder.Y - 18;
+        int helmX = shoulder.X - 9 + tilt;
+        int helmY = shoulder.Y - 16;
 
         Stamp(c, KnightArt.Plume, helmX - 7, helmY - 1);
         Stamp(c, KnightArt.Helmet, helmX, helmY);
