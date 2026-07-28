@@ -32,11 +32,11 @@ public static class KnightPoses
         return new Pose
         {
             HipNear = 5,
-            KneeNear = 4,
+            KneeNear = -4,
             AnkleNear = 0,
 
             HipFar = -8,
-            KneeFar = 8,
+            KneeFar = -8,
             AnkleFar = 2,
 
             // Sword arm hangs, blade angled forward and down.
@@ -75,12 +75,12 @@ public static class KnightPoses
         return new Pose
         {
             HipNear = swingNear * 24f,
-            KneeNear = liftNear * 42f + 4f,
-            AnkleNear = liftNear * 14f - swingNear * 5f,
+            KneeNear = -(liftNear * 46f + 4f),
+            AnkleNear = liftNear * 20f + swingNear * 6f,
 
             HipFar = swingFar * 24f,
-            KneeFar = liftFar * 42f + 4f,
-            AnkleFar = liftFar * 14f - swingFar * 5f,
+            KneeFar = -(liftFar * 46f + 4f),
+            AnkleFar = liftFar * 20f + swingFar * 6f,
 
             // The sword arm stays heavy and mostly still; the free arm swings.
             ShoulderNear = 14 - swingNear * 6f,
@@ -103,8 +103,8 @@ public static class KnightPoses
 
     public static Pose Crouch() => new Pose
     {
-        HipNear = -30, KneeNear = 74, AnkleNear = -32,
-        HipFar = -20, KneeFar = 68, AnkleFar = -30,
+        HipNear = -34, KneeNear = -78, AnkleNear = 40,
+        HipFar = -24, KneeFar = -72, AnkleFar = 38,
         ShoulderNear = 28, ElbowNear = 22,
         ShoulderFar = 14, ElbowFar = 30,
         Lean = 12, BodyY = 13, BodyX = -1, HeadTilt = -4,
@@ -113,8 +113,8 @@ public static class KnightPoses
 
     public static Pose Jump() => new Pose
     {
-        HipNear = -26, KneeNear = 54, AnkleNear = -16,
-        HipFar = 18, KneeFar = 16, AnkleFar = 8,
+        HipNear = -28, KneeNear = -58, AnkleNear = 30,
+        HipFar = 20, KneeFar = -18, AnkleFar = 6,
         ShoulderNear = -8, ElbowNear = 10,
         ShoulderFar = 34, ElbowFar = 12,
         Lean = -4, BodyY = -2, BodyX = 0, HeadTilt = 3,
@@ -123,8 +123,8 @@ public static class KnightPoses
 
     public static Pose Fall() => new Pose
     {
-        HipNear = 20, KneeNear = 12, AnkleNear = 10,
-        HipFar = -16, KneeFar = 36, AnkleFar = -8,
+        HipNear = 22, KneeNear = -14, AnkleNear = 4,
+        HipFar = -18, KneeFar = -40, AnkleFar = 22,
         ShoulderNear = 18, ElbowNear = 18,
         ShoulderFar = -28, ElbowFar = 18,
         Lean = 5, BodyY = 0, BodyX = 0, HeadTilt = -3,
@@ -134,8 +134,8 @@ public static class KnightPoses
     /// <summary>A low committed lunge, cape streaming flat behind.</summary>
     public static Pose Dash() => new Pose
     {
-        HipNear = 40, KneeNear = 8, AnkleNear = 12,
-        HipFar = -42, KneeFar = 56, AnkleFar = -18,
+        HipNear = 42, KneeNear = -10, AnkleNear = 2,
+        HipFar = -44, KneeFar = -60, AnkleFar = 34,
         ShoulderNear = -18, ElbowNear = 8,
         ShoulderFar = 40, ElbowFar = 14,
         Lean = 18, BodyY = 8, BodyX = 3, HeadTilt = -6,

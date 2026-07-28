@@ -19,13 +19,17 @@ namespace CreeperGame.Art;
 /// </summary>
 public static class KnightFigure
 {
-    public const int CanvasWidth = 112;
-    public const int CanvasHeight = 120;
-    public const int GroundY = 110;
-    private const int CentreX = 56;
+    public const int CanvasWidth = 140;
+    public const int CanvasHeight = 136;
+    public const int GroundY = 126;
+    private const int CentreX = 70;
 
-    /// <summary>Height of the figure in pixels, heel to plume.</summary>
-    public const int FigureHeight = 96;
+    /// <summary>
+    /// Height of the figure in pixels, heel to plume tip. Used to derive the
+    /// whole-number draw scale, so it must match what the layout actually
+    /// produces: ground 126 minus the plume top at 49.
+    /// </summary>
+    public const int FigureHeight = 77;
 
     // Limb lengths in pixels.
     private const int ThighLength = 17;
@@ -233,8 +237,9 @@ public static class KnightFigure
 
         int w = ArtWidth(art);
 
-        // Anchored to the shoulder blade, behind and above the chest.
-        Stamp(c, art, shoulder.X - w + 4, shoulder.Y - 8);
+        // Anchored at the shoulder blade. The art is drawn with its root at the
+        // lower right, so the stamp is offset left by almost the full width.
+        Stamp(c, art, shoulder.X - w + 8, shoulder.Y - 20);
     }
 
     // ==================================================================== cape
@@ -248,8 +253,9 @@ public static class KnightFigure
 
         int w = ArtWidth(art);
 
-        // Hangs from the shoulders, offset back so the body covers its front.
-        Stamp(c, art, shoulder.X - w + 5, shoulder.Y);
+        // Hangs from the collar. Offset back so the torso covers its front edge
+        // and it reads as being behind the body rather than beside it.
+        Stamp(c, art, shoulder.X - w + 7, shoulder.Y - 2);
     }
 
     // =================================================================== sword
@@ -261,7 +267,7 @@ public static class KnightFigure
 
         // The grip sits four rows up from the bottom of the sprite, so the art
         // is offset to put that on the fist.
-        const int gripRow = 24;
+        const int gripRow = 36;
 
         Stamp(c, art, hand.X - w / 2, hand.Y - gripRow);
     }

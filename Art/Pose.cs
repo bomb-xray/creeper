@@ -9,6 +9,12 @@ namespace CreeperGame.Art;
 /// </summary>
 public struct Pose
 {
+    /// <summary>
+    /// Knee bend, in degrees. A human knee only folds one way -- the shin swings
+    /// backwards, never forwards -- so this value must be NEGATIVE to bend the
+    /// leg naturally. Positive values hyperextend the joint, which is what made
+    /// the legs look broken in an earlier build.
+    /// </summary>
     public float HipNear, KneeNear, AnkleNear;
     public float HipFar, KneeFar, AnkleFar;
     public float ShoulderNear, ElbowNear;
